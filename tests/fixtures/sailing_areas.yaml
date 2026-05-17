@@ -1,0 +1,15 @@
+# Minimal fixture for loader tests
+- id: test-bay
+  name: Test Bay
+  country: US
+  timezone: America/Los_Angeles
+  tide_station_id: "9999999"
+  nws_zone: PZZ999
+  zones:
+    - id: test-zone
+      name: Test Zone
+      latitude: 37.5
+      longitude: -122.0
+      exposure: open
+      hazards:
+        - test hazard

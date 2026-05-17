@@ -1,0 +1,57 @@
+# Sailing regions with zones.
+# Phase 1: one default zone per region (first entry is the default).
+# Phase 2: expand to 3-4 zones per region.
+#
+# tide_station_id: NOAA CO-OPS station id (US only, null for non-US)
+# nws_zone:        NOAA NWS marine zone id (US only, null for non-US)
+
+- id: sf-bay
+  name: San Francisco Bay
+  country: US
+  timezone: America/Los_Angeles
+  tide_station_id: "9414290"   # San Francisco
+  nws_zone: PZZ545
+  zones:
+    - id: city-front
+      name: City Front
+      latitude: 37.808
+      longitude: -122.435
+      exposure: open
+      hazards:
+        - shipping traffic
+        - strong current
+        - afternoon fog
+
+- id: puget-sound
+  name: Puget Sound (Seattle)
+  country: US
+  timezone: America/Los_Angeles
+  tide_station_id: "9447130"   # Seattle
+  nws_zone: PZZ135
+  zones:
+    - id: shilshole
+      name: Shilshole Bay
+      latitude: 47.688
+      longitude: -122.407
+      exposure: open
+      hazards:
+        - ferry traffic
+        - tidal currents
+        - variable wind
+
+- id: sardinia
+  name: Sardinia
+  country: IT
+  timezone: Europe/Rome
+  tide_station_id: null
+  nws_zone: null
+  zones:
+    - id: costa-smeralda
+      name: Costa Smeralda
+      latitude: 41.082
+      longitude: 9.533
+      exposure: open
+      hazards:
+        - Mistral gusts
+        - rocky coastline
+        - boat traffic in season
