@@ -1,4 +1,4 @@
-"""Tests for domain/scoring.py v1."""
+"""Tests for domain/scoring.py v1 + v2."""
 import numpy as np
 import pandas as pd
 import pytest
@@ -6,9 +6,11 @@ import pytest
 from app.domain.scoring import (
     GATE_GUST_KT,
     GATE_VIS_M,
+    GATE_WAVE_M,
     GOOD_VIS_M,
     IDEAL_WIND_KT,
     IDEAL_WIND_MID,
+    WAT_MAX_PENALTY,
     add_sailability_to_hourly,
     best_windows,
     daily_sailability_avg,
@@ -17,21 +19,36 @@ from app.domain.scoring import (
 
 
 def _make_df(wind_kt=15.0, gust_kt=20.0, vis_m=15000.0, n=6) -> pd.DataFrame:
-    """Helper: build a minimal hourly DataFrame."""
+    """Helper: build a minimal hourly DataFrame (v1, no marine/tide data)."""
     ts = pd.date_range("2026-05-15", periods=n, freq="h")
     return pd.DataFrame({
         "timestamp": ts,
         "wind_kt": [wind_kt] * n,
         "gust_kt": [gust_kt] * n,
+        "wind_dir_deg": [270.0] * n,
         "visibility_m": [vis_m] * n,
     })
 
 
-class TestAddSailability:
+def _make_df_v2(wind_kt=15.0, gust_kt=20.0, vis_m=15000.0,
+                wave_h=0.5, wave_p=8.0,
+                current_kt=0.0, tide_rate=0.0,
+                n=6) -> pd.DataFrame:
+    """Helper: build a full v2 hourly DataFrame with marine + tide columns."""
+    df = _make_df(wind_kt=wind_kt, gust_kt=gust_kt, vis_m=vis_m, n=n)
+    df["wave_height_m"] = wave_h
+    df["wave_period_s"] = wave_p
+    df["current_speed_kt"] = current_kt
+    df["tide_rate_m_per_h"] = tide_rate
+    return df
+
+
+class TestAddSailabilityV1:
     def test_columns_added(self):
         df = _make_df()
         out = add_sailability_to_hourly(df)
-        for col in ("wind_score", "visibility_score", "gates_passed", "sailability"):
+        for col in ("wind_score", "sea_score", "visibility_score",
+                    "gates_passed", "wat_penalty", "sailability"):
             assert col in out.columns
 
     def test_ideal_wind_scores_near_100(self):
@@ -42,7 +59,7 @@ class TestAddSailability:
     def test_gust_gate_caps_score(self):
         df = _make_df(wind_kt=15.0, gust_kt=GATE_GUST_KT + 5.0, vis_m=GOOD_VIS_M)
         out = add_sailability_to_hourly(df)
-        assert out["gates_passed"].all() is False or not out["gates_passed"].any()
+        assert not out["gates_passed"].any()
         assert float(out["sailability"].max()) <= 25.0 + 1e-6
 
     def test_visibility_gate_caps_score(self):
@@ -58,7 +75,7 @@ class TestAddSailability:
         assert (out["sailability"] <= 100.0).all()
 
     def test_empty_df_returns_empty(self):
-        df = pd.DataFrame(columns=["timestamp", "wind_kt", "gust_kt", "visibility_m"])
+        df = pd.DataFrame(columns=["timestamp", "wind_kt", "gust_kt", "wind_dir_deg", "visibility_m"])
         out = add_sailability_to_hourly(df)
         assert out.empty
 
@@ -69,12 +86,77 @@ class TestAddSailability:
         out_ideal = add_sailability_to_hourly(df_ideal)
         assert float(out_zero["sailability"].mean()) < float(out_ideal["sailability"].mean())
 
-    def test_very_high_wind_scores_lower_than_ideal(self):
-        df_high = _make_df(wind_kt=50.0, gust_kt=25.0, vis_m=GOOD_VIS_M)
-        df_ideal = _make_df(wind_kt=IDEAL_WIND_MID, gust_kt=10.0, vis_m=GOOD_VIS_M)
-        out_high = add_sailability_to_hourly(df_high)
-        out_ideal = add_sailability_to_hourly(df_ideal)
-        assert float(out_high["sailability"].mean()) < float(out_ideal["sailability"].mean())
+    def test_sea_score_neutral_when_no_marine(self):
+        df = _make_df()
+        out = add_sailability_to_hourly(df)
+        assert (out["sea_score"] == 50.0).all()
+
+    def test_wat_penalty_zero_when_no_tides(self):
+        df = _make_df()
+        out = add_sailability_to_hourly(df)
+        assert (out["wat_penalty"] == 0.0).all()
+
+
+class TestAddSailabilityV2SeaScore:
+    def test_calm_seas_score_higher_than_rough(self):
+        df_calm = _make_df_v2(wave_h=0.3, wave_p=10.0)
+        df_rough = _make_df_v2(wave_h=2.0, wave_p=6.0)
+        out_calm = add_sailability_to_hourly(df_calm)
+        out_rough = add_sailability_to_hourly(df_rough)
+        assert float(out_calm["sea_score"].mean()) > float(out_rough["sea_score"].mean())
+
+    def test_wave_height_gate_caps_score(self):
+        df = _make_df_v2(wave_h=GATE_WAVE_M + 0.5, wave_p=8.0)
+        out = add_sailability_to_hourly(df)
+        assert not out["gates_passed"].any()
+        assert float(out["sailability"].max()) <= 25.0 + 1e-6
+
+    def test_chop_penalty_with_short_period(self):
+        df_chop = _make_df_v2(wave_h=0.5, wave_p=2.0)    # choppy
+        df_swell = _make_df_v2(wave_h=0.5, wave_p=10.0)  # nice swell
+        out_chop = add_sailability_to_hourly(df_chop)
+        out_swell = add_sailability_to_hourly(df_swell)
+        assert float(out_chop["sea_score"].mean()) < float(out_swell["sea_score"].mean())
+
+    def test_sea_score_range(self):
+        df = _make_df_v2(wave_h=1.0, wave_p=7.0)
+        out = add_sailability_to_hourly(df)
+        assert (out["sea_score"] >= 0.0).all()
+        assert (out["sea_score"] <= 100.0).all()
+
+
+class TestAddSailabilityV2WatPenalty:
+    def test_no_penalty_below_min_current(self):
+        # Calm current, even with direct wind opposition
+        df = _make_df_v2(wind_kt=15.0, current_kt=0.5, tide_rate=0.5)
+        df["wind_dir_deg"] = 55.0   # flood direction from north (typical SF)
+        out = add_sailability_to_hourly(df, flood_dir_deg=55.0)
+        assert (out["wat_penalty"] == 0.0).all()
+
+    def test_penalty_active_when_opposed_and_strong_current(self):
+        # Wind FROM 235 (opposite of flood direction 55)
+        n = 6
+        df = _make_df_v2(wind_kt=15.0, current_kt=3.0, tide_rate=0.3, n=n)
+        df["wind_dir_deg"] = 235.0   # ~ ebb direction — opposed to flood current at 55°
+        out = add_sailability_to_hourly(df, flood_dir_deg=55.0)
+        assert (out["wat_penalty"] > 0).all()
+        assert (out["wat_penalty"] <= WAT_MAX_PENALTY + 1e-6).all()
+
+    def test_no_penalty_when_no_flood_dir_deg(self):
+        df = _make_df_v2(current_kt=3.0, tide_rate=0.3)
+        df["wind_dir_deg"] = 235.0
+        out = add_sailability_to_hourly(df, flood_dir_deg=None)
+        assert (out["wat_penalty"] == 0.0).all()
+
+    def test_sailability_reduced_by_wat_penalty(self):
+        n = 6
+        df_no_wat = _make_df_v2(wind_kt=15.0, current_kt=0.0, tide_rate=0.0, n=n)
+        df_wat = _make_df_v2(wind_kt=15.0, current_kt=3.0, tide_rate=0.3, n=n)
+        df_wat["wind_dir_deg"] = 235.0
+        df_no_wat["wind_dir_deg"] = 235.0
+        out_no_wat = add_sailability_to_hourly(df_no_wat, flood_dir_deg=55.0)
+        out_wat = add_sailability_to_hourly(df_wat, flood_dir_deg=55.0)
+        assert float(out_wat["sailability"].mean()) < float(out_no_wat["sailability"].mean())
 
 
 class TestBestWindows:

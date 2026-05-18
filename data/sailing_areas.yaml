@@ -1,15 +1,18 @@
 # Sailing regions with zones.
-# Phase 1: one default zone per region (first entry is the default).
-# Phase 2: expand to 3-4 zones per region.
+# Phase 2: 3-4 zones per region. flood_dir_deg added for wind-against-tide scoring.
 #
-# tide_station_id: NOAA CO-OPS station id (US only, null for non-US)
+# flood_dir_deg: direction (degrees, TO) the current flows during a FLOOD tide
+#                (water rising). Ebb = flood_dir_deg + 180.
+#                null for regions without significant tidal currents (e.g. Sardinia).
+#
+# tide_station_id: NOAA CO-OPS water-level station id (US only, null for non-US)
 # nws_zone:        NOAA NWS marine zone id (US only, null for non-US)
 
 - id: sf-bay
   name: San Francisco Bay
   country: US
   timezone: America/Los_Angeles
-  tide_station_id: "9414290"   # San Francisco
+  tide_station_id: "9414290"   # San Francisco (MLLW datum)
   nws_zone: PZZ545
   zones:
     - id: city-front
@@ -17,10 +20,42 @@
       latitude: 37.808
       longitude: -122.435
       exposure: open
+      flood_dir_deg: 55       # ENE — flood current flows into the bay
       hazards:
         - shipping traffic
-        - strong current
+        - strong tidal current
         - afternoon fog
+
+    - id: berkeley-oc
+      name: Berkeley Olympic Circle
+      latitude: 37.866
+      longitude: -122.318
+      exposure: open
+      flood_dir_deg: 90       # E — current broadly eastward on flood
+      hazards:
+        - short-period chop
+        - kite surfer traffic
+
+    - id: raccoon-strait
+      name: Raccoon Strait
+      latitude: 37.873
+      longitude: -122.460
+      exposure: channel
+      flood_dir_deg: 65       # ENE — strong channelled flood current
+      hazards:
+        - very strong tidal current (3+ kt)
+        - wind shadow from Angel Island
+        - boat traffic
+
+    - id: south-bay
+      name: South Bay / Coyote Pt
+      latitude: 37.594
+      longitude: -122.319
+      exposure: sheltered
+      flood_dir_deg: 160      # SSE — flood flows south into South Bay
+      hazards:
+        - shallow water
+        - light and variable wind
 
 - id: puget-sound
   name: Puget Sound (Seattle)
@@ -34,9 +69,42 @@
       latitude: 47.688
       longitude: -122.407
       exposure: open
+      flood_dir_deg: 165      # SSE — flood into Puget Sound from Strait of Juan de Fuca
       hazards:
         - ferry traffic
         - tidal currents
+        - variable wind
+
+    - id: port-townsend
+      name: Port Townsend
+      latitude: 48.113
+      longitude: -122.759
+      exposure: open
+      flood_dir_deg: 155      # SSE — Admiralty Inlet flood
+      hazards:
+        - strong tidal currents (Admiralty Inlet)
+        - shipping lane
+        - fog
+
+    - id: elliott-bay
+      name: Elliott Bay (Seattle)
+      latitude: 47.607
+      longitude: -122.341
+      exposure: open
+      flood_dir_deg: 170      # S — flood into Elliott Bay
+      hazards:
+        - ferry traffic (busy)
+        - container ship traffic
+        - powerboat wash
+
+    - id: possession-sound
+      name: Possession Sound
+      latitude: 47.995
+      longitude: -122.278
+      exposure: open
+      flood_dir_deg: 150      # SSE — flood southward into Possession Sound
+      hazards:
+        - tidal rips
         - variable wind
 
 - id: sardinia
@@ -51,7 +119,39 @@
       latitude: 41.082
       longitude: 9.533
       exposure: open
+      flood_dir_deg: null     # tidal range < 0.3 m — currents negligible
       hazards:
-        - Mistral gusts
+        - Mistral gusts (can exceed 30 kt with little warning)
         - rocky coastline
-        - boat traffic in season
+        - dense boat traffic in season
+
+    - id: bonifacio
+      name: Bonifacio Strait
+      latitude: 41.370
+      longitude: 9.150
+      exposure: channel
+      flood_dir_deg: null
+      hazards:
+        - strong wind acceleration through strait
+        - tide-driven current (up to 2 kt)
+        - rocky passages
+
+    - id: cagliari
+      name: Cagliari Gulf
+      latitude: 39.182
+      longitude: 9.122
+      exposure: open
+      flood_dir_deg: null
+      hazards:
+        - Sirocco swell from SE
+        - shallow Gulf of Cagliari
+
+    - id: alghero
+      name: Alghero
+      latitude: 40.570
+      longitude: 8.316
+      exposure: open
+      flood_dir_deg: null
+      hazards:
+        - Mistral swell from NW
+        - anchoring restrictions near marine park
