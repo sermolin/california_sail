@@ -1,13 +1,15 @@
-"""Forecast orchestration: fetch → normalize → score → return."""
+"""Forecast orchestration v2: concurrent multi-source fetch → normalize → score → return."""
 from __future__ import annotations
 
+import concurrent.futures
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 
-from app.domain.normalize import open_meteo_response_to_df
+from app.domain.normalize import marine_response_to_df, merge_to_hourly, noaa_tides_to_df, open_meteo_response_to_df
 from app.domain.regions import SailingRegion, SailingZone
 from app.domain.scoring import (
     add_sailability_to_hourly,
@@ -16,7 +18,12 @@ from app.domain.scoring import (
     verdict,
 )
 from app.infra.config import load_config
+from app.infra.http import ApiUnavailableError
 from app.infra.open_meteo_client import fetch_forecast
+from app.infra.open_meteo_marine_client import fetch_marine_forecast
+from app.infra.noaa_tides_client import fetch_tide_predictions
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,11 +40,13 @@ class ZoneForecast:
 
     zone: SailingZone
     region: SailingRegion
-    df_hourly: pd.DataFrame          # scored hourly DataFrame
-    df_daily: pd.DataFrame           # daily aggregate (date, sailability_avg)
+    df_hourly: pd.DataFrame
+    df_daily: pd.DataFrame
     best_sail_windows: list[tuple[pd.Timestamp, pd.Timestamp, float]]
-    current_sailability: float       # average sailability for the next 6 hours
-    verdict: str                     # "GO" | "MAYBE" | "NO-GO"
+    current_sailability: float
+    verdict: str
+    has_marine_data: bool = False
+    has_tide_data: bool = False
 
 
 def _fetch_and_score(
@@ -46,20 +55,63 @@ def _fetch_and_score(
     options: ForecastOptions,
     session: Any,
 ) -> ZoneForecast:
-    raw = fetch_forecast(
-        zone.latitude,
-        zone.longitude,
-        days=options.days,
-        timezone=options.timezone,
-        session=session,
-    )
-    df_hourly = open_meteo_response_to_df(raw)
-    df_hourly = add_sailability_to_hourly(df_hourly)
+    """Fetch all available sources concurrently, merge, score, and return ZoneForecast."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        future_weather = pool.submit(
+            fetch_forecast,
+            zone.latitude, zone.longitude,
+            days=options.days, timezone=options.timezone, session=session,
+        )
+        future_marine = pool.submit(
+            fetch_marine_forecast,
+            zone.latitude, zone.longitude,
+            days=options.days, timezone=options.timezone, session=session,
+        )
+        future_tides = (
+            pool.submit(
+                fetch_tide_predictions,
+                region.tide_station_id,
+                days=options.days,
+                session=session,
+            )
+            if region.has_noaa_tides()
+            else None
+        )
+
+        # --- Weather (required) ---
+        raw_weather = future_weather.result()
+        df_weather = open_meteo_response_to_df(raw_weather)
+
+        # --- Marine (optional — degrades gracefully) ---
+        df_marine: pd.DataFrame | None = None
+        has_marine = False
+        try:
+            raw_marine = future_marine.result()
+            df_marine = marine_response_to_df(raw_marine)
+            has_marine = not df_marine.empty
+        except Exception as e:
+            _log.warning("Marine forecast unavailable for %s: %s", zone.id, e)
+
+        # --- NOAA tides (optional — US only) ---
+        df_tides: pd.DataFrame | None = None
+        has_tides = False
+        if future_tides is not None:
+            try:
+                raw_tides = future_tides.result()
+                df_tides = noaa_tides_to_df(raw_tides)
+                has_tides = not df_tides.empty
+            except Exception as e:
+                _log.warning("NOAA tides unavailable for %s: %s", zone.id, e)
+
+    # --- Merge ---
+    df_hourly = merge_to_hourly(df_weather, df_marine, df_tides)
+
+    # --- Score ---
+    df_hourly = add_sailability_to_hourly(df_hourly, flood_dir_deg=zone.flood_dir_deg)
 
     windows = best_windows(df_hourly, window_hours=3, top_n=3)
     df_daily = daily_sailability_avg(df_hourly)
 
-    # Sailability over the next 6 hours for the hero card
     now_score = (
         float(df_hourly["sailability"].iloc[:6].mean())
         if not df_hourly.empty
@@ -74,6 +126,8 @@ def _fetch_and_score(
         best_sail_windows=windows,
         current_sailability=now_score,
         verdict=verdict(now_score),
+        has_marine_data=has_marine,
+        has_tide_data=has_tides,
     )
 
 
@@ -91,16 +145,11 @@ def get_zone_forecast(
     nws_zone: str | None,
     exposure: str,
     hazards: tuple[str, ...],
+    flood_dir_deg: float | None,
     days: int,
     forecast_timezone: str,
 ) -> ZoneForecast:
-    """Cached forecast fetch for a single zone.
-
-    Streamlit cache_data cannot serialise dataclasses directly so we pass
-    primitive arguments and reconstruct the domain objects inside.
-    """
-    from app.domain.regions import SailingRegion, SailingZone
-
+    """Cached forecast fetch for a single zone (all primitive args for st.cache_data)."""
     zone = SailingZone(
         id=zone_id,
         name=zone_name,
@@ -108,6 +157,7 @@ def get_zone_forecast(
         longitude=lon,
         exposure=exposure,
         hazards=list(hazards),
+        flood_dir_deg=flood_dir_deg,
     )
     region = SailingRegion(
         id=region_id,
@@ -122,10 +172,7 @@ def get_zone_forecast(
     return _fetch_and_score(zone, region, opts, session=None)
 
 
-def get_default_zone_forecast(
-    region: SailingRegion,
-    days: int = 7,
-) -> ZoneForecast:
+def get_default_zone_forecast(region: SailingRegion, days: int = 7) -> ZoneForecast:
     """Convenience: fetch the default (first) zone of a region."""
     zone = region.default_zone
     return get_zone_forecast(
@@ -141,6 +188,7 @@ def get_default_zone_forecast(
         nws_zone=region.nws_zone,
         exposure=zone.exposure,
         hazards=tuple(zone.hazards),
+        flood_dir_deg=zone.flood_dir_deg,
         days=days,
         forecast_timezone=region.timezone,
     )

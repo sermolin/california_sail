@@ -15,8 +15,9 @@ class SailingZone:
     name: str
     latitude: float
     longitude: float
-    exposure: str        # "sheltered" | "open" | "channel"
-    hazards: list[str]   # human-readable hazard labels
+    exposure: str              # "sheltered" | "open" | "channel"
+    hazards: list[str]         # human-readable hazard labels
+    flood_dir_deg: float | None = None  # direction current flows TO during flood tide (Phase 2)
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
@@ -135,6 +136,7 @@ def _load_zones(raw_zones: list, region_id: str) -> list[SailingZone]:
                 longitude=_require_float(z, "longitude", f"zone {zid!r}"),
                 exposure=_get_str(z, "exposure", default="open"),
                 hazards=hazards,
+                flood_dir_deg=_get_optional_float(z, "flood_dir_deg"),
             )
         )
 
@@ -164,6 +166,16 @@ def _get_optional_str(obj: dict, key: str) -> str | None:
         return None
     s = str(v).strip()
     return s if s else None
+
+
+def _get_optional_float(obj: dict, key: str) -> float | None:
+    v = obj.get(key)
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _require_float(obj: dict, key: str, ctx: str) -> float:

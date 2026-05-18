@@ -1,4 +1,4 @@
-"""Plotly chart builders for California Sail (Phase 1).
+"""Plotly chart builders for California Sail (Phase 1 + Phase 2).
 
 Each function is pure: DataFrame → go.Figure.
 """
@@ -253,4 +253,181 @@ def cloud_precip_chart(df_hourly: pd.DataFrame) -> Figure:
             opacity=0.6,
             yaxis="y2",
         ))
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 charts
+# ---------------------------------------------------------------------------
+
+def wave_height_period_bar(df_hourly: pd.DataFrame) -> Figure:
+    """Bar chart of wave height coloured by wave period (short period = chop = warm colour)."""
+    if df_hourly.empty or "wave_height_m" not in df_hourly.columns:
+        return go.Figure(layout=go.Layout(**LAYOUT_DEFAULTS, title="Wave height & period"))
+
+    df = df_hourly.copy()
+    ts = df["timestamp"].astype(str)
+    heights = df["wave_height_m"].fillna(0.0)
+    periods = df["wave_period_s"].fillna(8.0) if "wave_period_s" in df.columns else [8.0] * len(df)
+
+    # Map wave period to a colour: short period (chop) → tomato, long swell → steelblue
+    def _period_color(p: float) -> str:
+        if p < 4.0:
+            return "tomato"
+        if p < 7.0:
+            return "goldenrod"
+        return "steelblue"
+
+    colors = [_period_color(float(p)) for p in periods]
+
+    fig = go.Figure(
+        data=go.Bar(
+            x=ts,
+            y=heights,
+            marker_color=colors,
+            name="Wave height (m)",
+            hovertemplate="%{x}<br>Height: %{y:.2f} m<extra></extra>",
+        ),
+        layout=go.Layout(
+            **LAYOUT_DEFAULTS,
+            title="Wave height (colour = period: blue=swell, red=chop)",
+            xaxis_title="Time",
+            yaxis_title="Wave height (m)",
+        ),
+    )
+
+    # Gate line
+    from app.domain.scoring import GATE_WAVE_M
+    fig.add_hline(
+        y=GATE_WAVE_M, line_dash="solid",
+        line_color="rgba(220,53,69,0.7)",
+        annotation_text=f"Gate ({GATE_WAVE_M:.1f} m)", annotation_position="top right",
+    )
+    return fig
+
+
+def tide_curve(df_hourly: pd.DataFrame) -> Figure:
+    """Tide water-level curve with flood/ebb shading and current speed overlay."""
+    if df_hourly.empty or "tide_height_m" not in df_hourly.columns:
+        return go.Figure(layout=go.Layout(**LAYOUT_DEFAULTS, title="Tide & currents"))
+
+    df = df_hourly.copy()
+    ts = df["timestamp"].astype(str)
+    heights = df["tide_height_m"].ffill()
+
+    fig = go.Figure(
+        layout=go.Layout(
+            **LAYOUT_DEFAULTS,
+            title="Tide height & tidal current speed",
+            xaxis_title="Time",
+            yaxis=dict(title="Tide height (m MLLW)"),
+            yaxis2=dict(title="Current speed (kt)", overlaying="y", side="right", showgrid=False),
+        )
+    )
+
+    fig.add_trace(go.Scatter(
+        x=ts, y=heights,
+        mode="lines",
+        fill="tozeroy",
+        fillcolor="rgba(100,149,237,0.2)",
+        line=dict(color="cornflowerblue", width=2),
+        name="Tide height (m)",
+        yaxis="y",
+    ))
+
+    if "current_speed_kt" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=ts, y=df["current_speed_kt"].fillna(0.0),
+            mode="lines",
+            line=dict(color="darkorange", width=1.5, dash="dot"),
+            name="Current (kt, approx)",
+            yaxis="y2",
+        ))
+
+    return fig
+
+
+def wind_against_tide_timeline(df_hourly: pd.DataFrame) -> Figure:
+    """Binary warning timeline: red when wind-against-tide penalty is active."""
+    if df_hourly.empty or "wat_penalty" not in df_hourly.columns:
+        return go.Figure(layout=go.Layout(
+            **{**LAYOUT_DEFAULTS, "height": 120},
+            title="Wind-against-tide warning",
+        ))
+
+    df = df_hourly.copy()
+    ts = df["timestamp"].astype(str)
+    wat = df["wat_penalty"].fillna(0.0)
+
+    fig = go.Figure(
+        layout=go.Layout(
+            **{**LAYOUT_DEFAULTS, "height": 120},
+            title="Wind-against-tide penalty (active = red)",
+            xaxis_title="Time",
+            yaxis=dict(title="Penalty (pts)", range=[0, 30]),
+        )
+    )
+    # Colour each bar independently
+    colors = ["rgba(220,53,69,0.7)" if v > 5 else "rgba(40,167,69,0.3)" for v in wat]
+    fig.add_trace(go.Bar(
+        x=ts, y=wat,
+        marker_color=colors,
+        name="WAT penalty",
+        hovertemplate="%{x}<br>Penalty: %{y:.0f} pts<extra></extra>",
+    ))
+    return fig
+
+
+def zone_map(
+    zones_data: list[dict],
+) -> Figure:
+    """Scattermapbox of sailing zones coloured and sized by current sailability.
+
+    zones_data: list of dicts with keys:
+        name, lat, lon, sailability, verdict, exposure
+    """
+    if not zones_data:
+        return go.Figure()
+
+    lats = [z["lat"] for z in zones_data]
+    lons = [z["lon"] for z in zones_data]
+    names = [z["name"] for z in zones_data]
+    scores = [z.get("sailability", 50.0) for z in zones_data]
+    verdicts = [z.get("verdict", "MAYBE") for z in zones_data]
+
+    from app.viz.themes import VERDICT_COLORS
+    marker_colors = [VERDICT_COLORS.get(v, "#6c757d") for v in verdicts]
+    texts = [
+        f"<b>{n}</b><br>Sailability: {s:.0f}<br>{v}"
+        for n, s, v in zip(names, scores, verdicts)
+    ]
+
+    fig = go.Figure(
+        data=go.Scattermap(
+            lat=lats,
+            lon=lons,
+            mode="markers+text",
+            marker=go.scattermap.Marker(
+                size=18,
+                color=marker_colors,
+                opacity=0.9,
+            ),
+            text=[f"{n}<br>{s:.0f}" for n, s in zip(names, scores)],
+            textposition="top right",
+            hovertext=texts,
+            hoverinfo="text",
+            name="Zones",
+        ),
+        layout=go.Layout(
+            map=dict(
+                style="open-street-map",
+                center=dict(lat=sum(lats) / len(lats), lon=sum(lons) / len(lons)),
+                zoom=8,
+            ),
+            margin=dict(l=0, r=0, t=40, b=40),
+            height=420,
+            title="Zone comparison — current sailability",
+            showlegend=False,
+        ),
+    )
     return fig
