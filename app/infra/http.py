@@ -43,10 +43,10 @@ def create_session(
     return session
 
 
-def get_json(session: requests.Session, url: str, params: dict[str, Any] | None = None) -> dict:
-    """GET url with optional params, parse JSON. Raises ApiUnavailableError on failure."""
+def get_json(session: requests.Session, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict:
+    """GET url with optional params and headers, parse JSON. Raises ApiUnavailableError on failure."""
     try:
-        resp = session.get(url, params=params, timeout=getattr(session, "timeout", 8))
+        resp = session.get(url, params=params, headers=headers, timeout=getattr(session, "timeout", 8))
     except requests.RequestException as e:
         raise ApiUnavailableError(f"Request failed for {url}: {e}") from e
 

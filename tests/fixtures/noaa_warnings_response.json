@@ -1,0 +1,56 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.abc123",
+        "event": "Small Craft Advisory",
+        "headline": "Small Craft Advisory issued May 15 at 3:00AM PDT until May 15 at 9:00PM PDT",
+        "description": "SMALL CRAFT ADVISORY REMAINS IN EFFECT FROM 3 AM THIS MORNING TO 9 PM PDT THIS EVENING.\nWINDS: Northwest 20 to 30 kt with gusts up to 35 kt.\nWAVES: 5 to 8 feet.",
+        "severity": "Moderate",
+        "urgency": "Expected",
+        "certainty": "Likely",
+        "effective": "2026-05-15T03:00:00-07:00",
+        "expires": "2026-05-15T21:00:00-07:00",
+        "status": "Actual",
+        "messageType": "Alert"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.def456",
+        "event": "Special Marine Warning",
+        "headline": "Special Marine Warning in effect for thunderstorms",
+        "description": "THUNDERSTORMS POSSIBLE THIS AFTERNOON. LIGHTNING HAZARD.",
+        "severity": "Severe",
+        "urgency": "Immediate",
+        "certainty": "Possible",
+        "effective": "2026-05-15T14:00:00-07:00",
+        "expires": "2026-05-15T17:00:00-07:00",
+        "status": "Actual",
+        "messageType": "Alert"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.ghi789",
+        "event": "Flood Watch",
+        "headline": "Flood watch for inland areas",
+        "description": "Not relevant to marine sailing.",
+        "severity": "Moderate",
+        "urgency": "Expected",
+        "certainty": "Possible",
+        "effective": "2026-05-15T00:00:00-07:00",
+        "expires": "2026-05-16T00:00:00-07:00",
+        "status": "Actual",
+        "messageType": "Alert"
+      }
+    }
+  ]
+}
