@@ -1,22 +1,20 @@
-"""Streamlit page layout for California Sail — Phase 2.
+"""Streamlit page layout for California Sail — Phase 3 final.
 
 Flow:
-  1. Sidebar: region, forecast days
+  1. Sidebar: region · forecast days · sailor profile
   2. Main area:
-     a. Load all zones for the region concurrently (cached)
-     b. Zone-comparison map (Scattermapbox, coloured by verdict)
-     c. Zone-comparison metrics table
-     d. Zone selectbox (defaults to best zone)
-     e. Detailed forecast for selected zone (Phase 1 charts + Phase 2 wave/tide charts)
+     a. Active NOAA marine warnings panel (US regions only)
+     b. Zone-comparison map + ranking table
+     c. Zone selectbox (defaults to best zone)
+     d. Detailed forecast for selected zone (all charts + profile-aware thresholds)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
+from app.domain.profiles import SailorProfile, get_all_profiles
 from app.domain.regions import SailingRegion, load_regions
 from app.services.forecast_service import ZoneForecast
 from app.services.region_service import get_all_zone_forecasts
@@ -26,8 +24,10 @@ from app.ui.components import (
     hazards_section,
     last_updated_at,
     sail_windows_section,
+    sailor_profile_selector,
     scoring_formula_expander,
     summary_metrics,
+    warnings_panel,
 )
 from app.viz.charts import (
     cloud_precip_chart,
@@ -42,13 +42,18 @@ from app.viz.charts import (
 )
 from app.viz.themes import VERDICT_COLORS, VERDICT_EMOJI
 
+import pandas as pd
+
 
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 
-def render_sidebar(regions: list[SailingRegion]) -> tuple[SailingRegion, int]:
-    """Render sidebar controls. Returns (selected_region, forecast_days)."""
+def render_sidebar(
+    regions: list[SailingRegion],
+    profiles: list[SailorProfile],
+) -> tuple[SailingRegion, int, SailorProfile]:
+    """Render sidebar. Returns (region, forecast_days, profile)."""
     st.sidebar.header("Settings")
 
     region_names = [r.name for r in regions]
@@ -58,13 +63,17 @@ def render_sidebar(regions: list[SailingRegion]) -> tuple[SailingRegion, int]:
     days = st.sidebar.slider("Forecast days", min_value=1, max_value=7, value=5)
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**Scoring profile (Phase 2)**")
-    st.sidebar.info(
-        "Cruiser baseline — ideal wind 10–18 kt, gust gate 30 kt,\n"
-        "wave gate 2.5 m. Wind-against-tide penalty up to 25 pts.\n\n"
-        "Phase 3 will add School / Cruiser / Racer profiles."
+    profile = sailor_profile_selector(profiles)
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Scoring v3** — profile-driven thresholds")
+    st.sidebar.caption(
+        f"Gust gate: {profile.max_gust_kt:.0f} kt · "
+        f"Wave gate: {profile.max_wave_m:.1f} m · "
+        f"Vis gate: {profile.min_visibility_km:.0f} km"
     )
-    return region, days
+
+    return region, days, profile
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +81,6 @@ def render_sidebar(regions: list[SailingRegion]) -> tuple[SailingRegion, int]:
 # ---------------------------------------------------------------------------
 
 def render_zone_comparison(results: list[ZoneForecast]) -> None:
-    """Render the zone-comparison map and summary table."""
-    # Build map data
     map_data = [
         {
             "name": r.zone.name,
@@ -87,10 +94,8 @@ def render_zone_comparison(results: list[ZoneForecast]) -> None:
     ]
     st.plotly_chart(zone_map(map_data), use_container_width=True)
 
-    # Visual spacer so the OSM attribution doesn't crowd the heading below
     st.write("")
 
-    # Summary comparison table
     st.markdown("#### Zone rankings (next 6 h)")
     rows = []
     for i, r in enumerate(results):
@@ -123,9 +128,14 @@ def render_zone_comparison(results: list[ZoneForecast]) -> None:
 # ---------------------------------------------------------------------------
 
 def render_zone_detail(result: ZoneForecast) -> None:
-    """Render full forecast detail for a selected zone."""
     df = result.df_hourly
     zone = result.zone
+    profile = result.profile
+
+    # Warnings panel at the top
+    if result.warnings:
+        warnings_panel(result.warnings)
+        st.markdown("")
 
     go_nogo_header(result.verdict, result.current_sailability, zone.name)
 
@@ -135,7 +145,6 @@ def render_zone_detail(result: ZoneForecast) -> None:
     avg_sail = float(df24["sailability"].mean()) if not df24.empty else 0.0
     summary_metrics(avg_wind, max_gust, avg_sail)
 
-    # Extra Phase 2 metrics
     if not df24.empty and "wave_height_m" in df24.columns:
         avg_wave = float(df24["wave_height_m"].mean())
         avg_period = float(df24["wave_period_s"].mean()) if "wave_period_s" in df24.columns else None
@@ -150,28 +159,27 @@ def render_zone_detail(result: ZoneForecast) -> None:
 
     hazards_section(zone.hazards)
 
+    status_parts = []
     if result.has_marine_data:
-        st.info("Wave data from Open-Meteo Marine API is active. Using v2 sailability scoring.")
+        status_parts.append("Wave data active")
     if result.has_tide_data:
-        st.info("Tide data from NOAA CO-OPS is active. Wind-against-tide penalty enabled.")
+        status_parts.append("Tide & current data active")
+    if status_parts:
+        st.info(" · ".join(status_parts) + " — using v3 sailability scoring.")
 
     st.markdown("---")
 
-    # Sailability ribbon
     st.plotly_chart(sailability_ribbon(df, hours=72), use_container_width=True)
 
-    # Wind charts
     col_rose, col_timeline = st.columns([1, 2])
     with col_rose:
         st.plotly_chart(wind_rose(df), use_container_width=True)
     with col_timeline:
         st.plotly_chart(wind_timeline_with_gusts(df), use_container_width=True)
 
-    # Phase 2: Wave charts
     if "wave_height_m" in df.columns:
         st.plotly_chart(wave_height_period_bar(df), use_container_width=True)
 
-    # Phase 2: Tide + WAT charts
     if "tide_height_m" in df.columns:
         col_tide, col_wat = st.columns([2, 1])
         with col_tide:
@@ -179,7 +187,6 @@ def render_zone_detail(result: ZoneForecast) -> None:
         with col_wat:
             st.plotly_chart(wind_against_tide_timeline(df), use_container_width=True)
 
-    # Secondary weather charts
     col_temp, col_cloud = st.columns(2)
     with col_temp:
         st.plotly_chart(temperature_line(df), use_container_width=True)
@@ -189,10 +196,8 @@ def render_zone_detail(result: ZoneForecast) -> None:
     st.markdown("---")
 
     sail_windows_section(result.best_sail_windows)
-    scoring_formula_expander()
-
-    ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    last_updated_at(ts_str)
+    scoring_formula_expander(profile)
+    last_updated_at(result.region.timezone)
 
 
 # ---------------------------------------------------------------------------
@@ -200,24 +205,21 @@ def render_zone_detail(result: ZoneForecast) -> None:
 # ---------------------------------------------------------------------------
 
 def run(sailing_areas_path: str | Path) -> None:
-    """Build full layout: sidebar → zone comparison → zone detail."""
+    """Build full layout: sidebar → warnings → zone comparison → zone detail."""
     regions = load_regions(sailing_areas_path)
     if not regions:
         st.warning("No sailing regions configured. Check data/sailing_areas.yaml.")
         return
 
-    region, days = render_sidebar(regions)
+    profiles = get_all_profiles()
+    region, days, profile = render_sidebar(regions, profiles)
 
     st.subheader(f"{region.name}")
-    st.caption(f"{len(region.zones)} zones · {days}-day forecast")
-
-    # Fetch all zones (concurrently, all cached individually)
-    all_results: list[ZoneForecast] = []
-    errors: list[str] = []
+    st.caption(f"{len(region.zones)} zones · {days}-day forecast · {profile.emoji} {profile.name} profile")
 
     with st.spinner(f"Loading forecast for all {region.name} zones…"):
         try:
-            all_results = get_all_zone_forecasts(region, days=days)
+            all_results = get_all_zone_forecasts(region, days=days, profile=profile)
         except Exception as e:
             error_message(str(e))
             return
@@ -226,12 +228,10 @@ def run(sailing_areas_path: str | Path) -> None:
         st.error("No zone forecasts could be loaded. Please check your connection.")
         return
 
-    # Zone comparison section
     render_zone_comparison(all_results)
 
     st.markdown("---")
 
-    # Zone selector (default = best zone)
     zone_names = [r.zone.name for r in all_results]
     selected_zone_name = st.selectbox(
         "Select zone for detailed forecast",
@@ -241,5 +241,4 @@ def run(sailing_areas_path: str | Path) -> None:
     )
     selected_result = next(r for r in all_results if r.zone.name == selected_zone_name)
 
-    # Detailed zone forecast
     render_zone_detail(selected_result)

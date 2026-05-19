@@ -5,6 +5,7 @@ import concurrent.futures
 import logging
 from pathlib import Path
 
+from app.domain.profiles import SailorProfile, get_default_profile
 from app.domain.regions import SailingRegion, SailingZone, load_regions
 from app.services.forecast_service import ZoneForecast, get_zone_forecast
 
@@ -14,12 +15,12 @@ _log = logging.getLogger(__name__)
 def get_all_zone_forecasts(
     region: SailingRegion,
     days: int = 7,
+    profile: SailorProfile | None = None,
 ) -> list[ZoneForecast]:
-    """Fetch forecasts for all zones in a region, sorted best-to-worst.
+    """Fetch forecasts for all zones in a region, sorted best-to-worst."""
+    if profile is None:
+        profile = get_default_profile()
 
-    Uses Streamlit cache_data via get_zone_forecast, so repeated calls within
-    the TTL window are served from memory.
-    """
     def _fetch_zone(zone: SailingZone) -> ZoneForecast | None:
         try:
             return get_zone_forecast(
@@ -38,6 +39,7 @@ def get_all_zone_forecasts(
                 flood_dir_deg=zone.flood_dir_deg,
                 days=days,
                 forecast_timezone=region.timezone,
+                profile_id=profile.id,
             )
         except Exception as exc:
             _log.warning("Could not fetch forecast for zone %s: %s", zone.id, exc)

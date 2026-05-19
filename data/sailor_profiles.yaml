@@ -1,0 +1,49 @@
+# Sailor profiles — drive scoring thresholds in Phase 3.
+#
+# ideal_wind_kt:      [low, high] sweet-spot range (Gaussian peak at midpoint)
+# max_gust_kt:        hard No-Go gate if exceeded
+# max_wave_m:         hard No-Go gate if exceeded (requires marine data)
+# min_visibility_km:  hard No-Go gate below this (converted to m internally)
+# requires_low_chop:  if true the chop penalty is doubled for short wave periods
+# chop_penalty:       points deducted per-hour when wave_period_s < chop_period_s
+# chop_period_s:      wave period below which chop penalty is applied
+# wat_min_current_kt: tidal current speed below which WAT penalty is inactive
+
+- id: school
+  name: "School / Beginner"
+  emoji: "🎓"
+  boat_size_hint: "Dinghy, club keelboat, or beginner course boat"
+  ideal_wind_kt: [5, 12]
+  max_gust_kt: 20
+  max_wave_m: 1.0
+  min_visibility_km: 3.0
+  requires_low_chop: true
+  chop_penalty: 40
+  chop_period_s: 5.0
+  wat_min_current_kt: 0.5
+
+- id: cruiser
+  name: "Cruiser"
+  emoji: "⛵"
+  boat_size_hint: "30–45 ft cruising sailboat"
+  ideal_wind_kt: [10, 18]
+  max_gust_kt: 30
+  max_wave_m: 2.5
+  min_visibility_km: 1.0
+  requires_low_chop: false
+  chop_penalty: 25
+  chop_period_s: 4.0
+  wat_min_current_kt: 1.0
+
+- id: racer
+  name: "Racer"
+  emoji: "🏆"
+  boat_size_hint: "Racing yacht, sportboat, or offshore racer"
+  ideal_wind_kt: [14, 25]
+  max_gust_kt: 35
+  max_wave_m: 3.5
+  min_visibility_km: 1.0
+  requires_low_chop: false
+  chop_penalty: 15
+  chop_period_s: 3.0
+  wat_min_current_kt: 1.5

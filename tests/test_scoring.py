@@ -1,8 +1,9 @@
-"""Tests for domain/scoring.py v1 + v2."""
+"""Tests for domain/scoring.py v1 + v2 + v3 (profile-driven)."""
 import numpy as np
 import pandas as pd
 import pytest
 
+from app.domain.profiles import get_profile_by_id
 from app.domain.scoring import (
     GATE_GUST_KT,
     GATE_VIS_M,
@@ -218,3 +219,75 @@ class TestVerdict:
     ])
     def test_verdict_boundaries(self, score, expected):
         assert verdict(score) == expected
+
+
+# ---------------------------------------------------------------------------
+# v3 profile-driven scoring tests
+# ---------------------------------------------------------------------------
+
+class TestScoringV3Profiles:
+    """Verify that profile thresholds actually change scoring outcomes."""
+
+    def _df_with_waves(self, wind_kt=15.0, gust_kt=22.0, wave_h=0.8, wave_p=8.0, n=6):
+        ts = pd.date_range("2026-05-15", periods=n, freq="h")
+        return pd.DataFrame({
+            "timestamp": ts,
+            "wind_kt": [wind_kt] * n,
+            "gust_kt": [gust_kt] * n,
+            "wind_dir_deg": [270.0] * n,
+            "visibility_m": [10000.0] * n,
+            "wave_height_m": [wave_h] * n,
+            "wave_period_s": [wave_p] * n,
+            "current_speed_kt": [0.0] * n,
+            "tide_rate_m_per_h": [0.0] * n,
+        })
+
+    def test_school_lower_gust_gate_than_cruiser(self):
+        """25 kt gust: fine for cruiser, should fail school's 20 kt gate."""
+        df = self._df_with_waves(gust_kt=22.0)
+        school = get_profile_by_id("school")
+        cruiser = get_profile_by_id("cruiser")
+        out_school = add_sailability_to_hourly(df.copy(), profile=school)
+        out_cruiser = add_sailability_to_hourly(df.copy(), profile=cruiser)
+        assert not out_school["gates_passed"].any(), "school gate should fail at 22 kt gust"
+        assert out_cruiser["gates_passed"].all(), "cruiser gate should pass at 22 kt gust"
+
+    def test_racer_scores_higher_in_strong_wind(self):
+        """18 kt wind is ideal for racer but above cruiser's sweet spot."""
+        df = self._df_with_waves(wind_kt=22.0, gust_kt=28.0)
+        racer = get_profile_by_id("racer")
+        cruiser = get_profile_by_id("cruiser")
+        out_racer = add_sailability_to_hourly(df.copy(), profile=racer)
+        out_cruiser = add_sailability_to_hourly(df.copy(), profile=cruiser)
+        assert float(out_racer["wind_score"].mean()) > float(out_cruiser["wind_score"].mean())
+
+    def test_school_lower_wave_gate_than_cruiser(self):
+        """1.2 m waves: passes cruiser gate (2.5 m) but fails school gate (1.0 m)."""
+        df = self._df_with_waves(wave_h=1.2, gust_kt=15.0)
+        school = get_profile_by_id("school")
+        cruiser = get_profile_by_id("cruiser")
+        out_school = add_sailability_to_hourly(df.copy(), profile=school)
+        out_cruiser = add_sailability_to_hourly(df.copy(), profile=cruiser)
+        assert not out_school["gates_passed"].any()
+        assert out_cruiser["gates_passed"].all()
+
+    def test_school_higher_chop_penalty(self):
+        """Choppy conditions (short wave period) should hurt school more than racer."""
+        df = self._df_with_waves(wave_h=0.3, wave_p=2.5, gust_kt=15.0)
+        school = get_profile_by_id("school")
+        racer = get_profile_by_id("racer")
+        out_school = add_sailability_to_hourly(df.copy(), profile=school)
+        out_racer = add_sailability_to_hourly(df.copy(), profile=racer)
+        assert float(out_school["sea_score"].mean()) < float(out_racer["sea_score"].mean())
+
+    def test_no_profile_uses_cruiser_defaults(self):
+        """Calling without a profile should give same result as cruiser profile."""
+        df = self._df_with_waves()
+        cruiser = get_profile_by_id("cruiser")
+        out_default = add_sailability_to_hourly(df.copy(), profile=None)
+        out_cruiser = add_sailability_to_hourly(df.copy(), profile=cruiser)
+        pd.testing.assert_series_equal(
+            out_default["sailability"].reset_index(drop=True),
+            out_cruiser["sailability"].reset_index(drop=True),
+            rtol=1e-4,
+        )
