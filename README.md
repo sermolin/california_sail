@@ -205,9 +205,99 @@ docker run -p 8501:8501 california-sail
 
 ---
 
+---
+
+## Using as an MCP Server (Phase 4a)
+
+California Sail exposes its forecast services as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server.  Any MCP-aware AI agent — Cursor, Claude Desktop, OpenAI Agents SDK, or a future Telegram/Slack bot — can call the 8 tools below to get live sailing conditions.
+
+### Available tools
+
+| Tool | Description |
+|---|---|
+| `list_regions` | List all regions (SF Bay, Puget Sound, Sardinia) |
+| `list_zones` | List sailing zones within a region |
+| `list_profiles` | List sailor profiles (school, cruiser, racer) |
+| `get_zone_forecast` | Fetch scored forecast for a zone |
+| `compare_zones_in_region` | Rank all zones in a region by sailability |
+| `best_sail_windows` | Find the top 3 best sailing time windows |
+| `get_active_warnings` | Get active NOAA marine warnings (US only) |
+| `explain_score` | Explain the sailability score for a specific hour |
+
+### Transport modes
+
+**stdio** (for Cursor / Claude Desktop — the client starts the process):
+
+```bash
+python -m app.mcp.server          # defaults to stdio
+```
+
+**SSE** (HTTP + Server-Sent Events, for remote agents / bots):
+
+```bash
+python -m app.mcp.server --transport sse --port 8765
+# agents connect to: http://127.0.0.1:8765/sse
+```
+
+### Cursor configuration
+
+Add to your workspace `.cursor/mcp.json` (update paths to match your installation):
+
+```json
+{
+  "mcpServers": {
+    "california-sail": {
+      "command": "/path/to/california_sail/.venv/bin/python",
+      "args": ["-m", "app.mcp.server"],
+      "cwd": "/path/to/california_sail"
+    }
+  }
+}
+```
+
+A ready-to-paste snippet is at `examples/mcp/cursor.json`.
+
+### Claude Desktop configuration
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "california-sail": {
+      "command": "/path/to/california_sail/.venv/bin/python",
+      "args": ["-m", "app.mcp.server"],
+      "cwd": "/path/to/california_sail"
+    }
+  }
+}
+```
+
+A ready-to-paste snippet is at `examples/mcp/claude_desktop.json`.
+
+### Sample agent prompts
+
+Once connected, an agent can answer questions like:
+
+1. **"Where should I sail in SF Bay this afternoon?"** — agent calls `compare_zones_in_region("sf-bay")` and optionally `get_active_warnings("sf-bay")`.
+2. **"What's the best time to sail from Shilshole this weekend?"** — agent calls `best_sail_windows("shilshole", days=3)`.
+3. **"Is it safe to take students out on the bay today?"** — agent calls `get_zone_forecast("city-front", profile_id="school")` and `get_active_warnings("sf-bay")`.
+4. **"Why did Berkeley Olympic Circle score only 42?"** — agent calls `explain_score("berkeley-oc")` to get a plain-language breakdown.
+5. **"Compare all Sardinia zones for a racing sailor."** — agent calls `compare_zones_in_region("sardinia", profile_id="racer")`.
+
+### Notes
+
+- The MCP server reads **no user state** — it is purely a forecast query service.
+- Authentication on the SSE transport is not implemented (fine for localhost dev).
+- The server uses a 15-minute in-process TTL cache (`TTLForecastCache`) so repeated calls in the same session hit live APIs at most once per quarter-hour.
+
+---
+
 ## Out of scope (deferred)
 
 - Paid tidal current data for Sardinia (Stormglass)
 - User accounts / persistent preferences / push notifications
 - Custom user-defined zones
 - Race-route planning / polar performance diagrams
+- Channel adapters (Telegram, Slack) — Phase 4b/4c
+- Authentication on the MCP HTTP transport — Phase 5 (GCP)

@@ -4,6 +4,12 @@ v3 adds:
   - SailorProfile parameter drives scoring thresholds
   - NOAA marine warnings fetch as 4th concurrent call (US regions only)
   - ZoneForecast gains `warnings` and `profile` fields
+
+Cache refactor (Phase 4a):
+  - `@st.cache_data` lives on the private `_st_get_zone_forecast` function.
+  - `get_zone_forecast` dispatches to that function when cache is None or
+    StreamlitForecastCache (backward-compatible), or delegates to the provided
+    ForecastCache implementation (used by the MCP server).
 """
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ from app.domain.profiles import SailorProfile, get_default_profile, get_profile_
 from app.domain.regions import SailingRegion, SailingZone
 from app.domain.scoring import add_sailability_to_hourly, best_windows, daily_sailability_avg, verdict
 from app.infra.config import load_config
+from app.infra.forecast_cache import ForecastCache, StreamlitForecastCache
 from app.infra.noaa_tides_client import fetch_tide_predictions
 from app.infra.noaa_warnings_client import fetch_marine_warnings
 from app.infra.open_meteo_client import fetch_forecast
@@ -61,6 +68,7 @@ def _fetch_and_score(
     session: Any,
     profile: SailorProfile,
 ) -> ZoneForecast:
+    """Pure, uncached fetch-and-score worker. Called by the cache layer."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         future_weather = pool.submit(
             fetch_forecast,
@@ -131,6 +139,38 @@ def _fetch_and_score(
 
 
 @st.cache_data(ttl=load_config().cache_ttl_seconds, show_spinner=False)
+def _st_get_zone_forecast(
+    zone_id: str,
+    region_id: str,
+    lat: float,
+    lon: float,
+    zone_name: str,
+    region_name: str,
+    country: str,
+    timezone: str,
+    tide_station_id: str | None,
+    nws_zone: str | None,
+    exposure: str,
+    hazards: tuple[str, ...],
+    flood_dir_deg: float | None,
+    days: int,
+    forecast_timezone: str,
+    profile_id: str,
+) -> ZoneForecast:
+    """@st.cache_data-decorated dispatcher for Streamlit callers (all primitive args)."""
+    zone = SailingZone(
+        id=zone_id, name=zone_name, latitude=lat, longitude=lon,
+        exposure=exposure, hazards=list(hazards), flood_dir_deg=flood_dir_deg,
+    )
+    region = SailingRegion(
+        id=region_id, name=region_name, country=country, timezone=timezone,
+        tide_station_id=tide_station_id, nws_zone=nws_zone, zones=[zone],
+    )
+    profile = get_profile_by_id(profile_id)
+    opts = ForecastOptions(days=days, timezone=forecast_timezone)
+    return _fetch_and_score(zone, region, opts, session=None, profile=profile)
+
+
 def get_zone_forecast(
     zone_id: str,
     region_id: str,
@@ -148,8 +188,35 @@ def get_zone_forecast(
     days: int,
     forecast_timezone: str,
     profile_id: str = "cruiser",
+    cache: ForecastCache | None = None,
 ) -> ZoneForecast:
-    """Cached forecast fetch for a single zone (all primitive args for st.cache_data)."""
+    """Fetch and score a single zone forecast, using the supplied cache backend.
+
+    When *cache* is ``None`` or a :class:`StreamlitForecastCache`, the call is
+    forwarded to ``_st_get_zone_forecast`` which is decorated with
+    ``@st.cache_data`` — the behaviour is identical to Phase 1-3.
+
+    When *cache* is any other :class:`ForecastCache` implementation (e.g. the
+    ``TTLForecastCache`` used by the MCP server), the cache's ``get_or_compute``
+    method is called with a stable string key so Streamlit is never imported on
+    the hot path.
+    """
+    if cache is None or isinstance(cache, StreamlitForecastCache):
+        return _st_get_zone_forecast(
+            zone_id=zone_id, region_id=region_id,
+            lat=lat, lon=lon,
+            zone_name=zone_name, region_name=region_name,
+            country=country, timezone=timezone,
+            tide_station_id=tide_station_id, nws_zone=nws_zone,
+            exposure=exposure, hazards=hazards,
+            flood_dir_deg=flood_dir_deg,
+            days=days, forecast_timezone=forecast_timezone,
+            profile_id=profile_id,
+        )
+
+    key = f"{zone_id}:{profile_id}:{days}"
+    ttl = load_config().cache_ttl_seconds
+
     zone = SailingZone(
         id=zone_id, name=zone_name, latitude=lat, longitude=lon,
         exposure=exposure, hazards=list(hazards), flood_dir_deg=flood_dir_deg,
@@ -160,13 +227,18 @@ def get_zone_forecast(
     )
     profile = get_profile_by_id(profile_id)
     opts = ForecastOptions(days=days, timezone=forecast_timezone)
-    return _fetch_and_score(zone, region, opts, session=None, profile=profile)
+
+    return cache.get_or_compute(
+        key=key, ttl=ttl,
+        compute=lambda: _fetch_and_score(zone, region, opts, session=None, profile=profile),
+    )
 
 
 def get_default_zone_forecast(
     region: SailingRegion,
     days: int = 7,
     profile: SailorProfile | None = None,
+    cache: ForecastCache | None = None,
 ) -> ZoneForecast:
     """Convenience: fetch the default (first) zone of a region."""
     if profile is None:
@@ -182,4 +254,5 @@ def get_default_zone_forecast(
         flood_dir_deg=zone.flood_dir_deg,
         days=days, forecast_timezone=region.timezone,
         profile_id=profile.id,
+        cache=cache,
     )
