@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "california-sail": {
+      "command": "/path/to/california_sail/.venv/bin/python",
+      "args": ["-m", "app.mcp.server"],
+      "cwd": "/path/to/california_sail",
+      "env": {
+        "PYTHONPATH": "/path/to/california_sail"
+      }
+    }
+  }
+}

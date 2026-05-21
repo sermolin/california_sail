@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.domain.profiles import SailorProfile, get_default_profile
 from app.domain.regions import SailingRegion, SailingZone, load_regions
+from app.infra.forecast_cache import ForecastCache
 from app.services.forecast_service import ZoneForecast, get_zone_forecast
 
 _log = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ def get_all_zone_forecasts(
     region: SailingRegion,
     days: int = 7,
     profile: SailorProfile | None = None,
+    cache: ForecastCache | None = None,
 ) -> list[ZoneForecast]:
     """Fetch forecasts for all zones in a region, sorted best-to-worst."""
     if profile is None:
@@ -40,6 +42,7 @@ def get_all_zone_forecasts(
                 days=days,
                 forecast_timezone=region.timezone,
                 profile_id=profile.id,
+                cache=cache,
             )
         except Exception as exc:
             _log.warning("Could not fetch forecast for zone %s: %s", zone.id, exc)
