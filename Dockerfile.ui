@@ -1,0 +1,24 @@
+# Streamlit UI — california-sail-ui
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies first (layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Cloud Run injects PORT; Streamlit defaults to 8501 locally
+ENV PORT=8501
+
+EXPOSE 8501
+
+# Disable Streamlit's file watcher (not useful in containers) and browser auto-open
+CMD ["sh", "-c", \
+  "streamlit run app/app.py \
+   --server.port=$PORT \
+   --server.address=0.0.0.0 \
+   --server.fileWatcherType=none \
+   --browser.gatherUsageStats=false"]

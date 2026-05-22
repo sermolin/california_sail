@@ -1,0 +1,47 @@
+version: "3.9"
+
+# Local integration testing for both services.
+# Requires a .env file with TELEGRAM_BOT_TOKEN set.
+#
+# Usage:
+#   docker-compose up --build
+#
+# Services:
+#   http://localhost:8501  — Streamlit UI
+#   http://localhost:8080  — FastAPI (Telegram webhook + MCP SSE)
+#   http://localhost:8080/mcp/sse  — MCP SSE endpoint
+
+services:
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    ports:
+      - "8501:8501"
+    environment:
+      - PORT=8501
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      # WEBHOOK_URL is intentionally not set locally — bot runs in polling mode
+      # for local dev; use `python -m app.bot.telegram` for that.
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

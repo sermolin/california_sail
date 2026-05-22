@@ -195,6 +195,76 @@ docker run -p 8501:8501 california-sail
 
 ---
 
+## Deployment — Google Cloud Run (Phase 5)
+
+Deploys two Cloud Run services into GCP project `sermolin-2026`, region `us-west1`.
+
+```
+california-sail-ui   — Streamlit web UI (port 8501)
+california-sail-api  — FastAPI: Telegram webhook + MCP SSE (port 8080)
+```
+
+### One-time setup (run from your local terminal)
+
+```bash
+# 1. Authenticate
+gcloud auth login
+gcloud auth configure-docker us-west1-docker.pkg.dev
+
+# 2. Create Artifact Registry repo
+gcloud artifacts repositories create california-sail \
+  --repository-format=docker --location=us-west1 --project=sermolin-2026
+
+# 3. Create a Telegram bot via @BotFather → copy the token
+# 4. Store the token in Secret Manager
+gcloud secrets create TELEGRAM_BOT_TOKEN --project=sermolin-2026
+echo -n "YOUR_TOKEN_HERE" | \
+  gcloud secrets versions add TELEGRAM_BOT_TOKEN --data-file=- --project=sermolin-2026
+
+# 5. Grant the default compute SA access to the secret
+PROJECT_NUMBER=$(gcloud projects describe sermolin-2026 --format='value(projectNumber)')
+gcloud secrets add-iam-policy-binding TELEGRAM_BOT_TOKEN \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor" \
+  --project=sermolin-2026
+```
+
+### Deploy
+
+```bash
+# Deploy both services (images are built by Cloud Build, no local Docker needed)
+./scripts/deploy.sh
+
+# Deploy one service at a time
+./scripts/deploy.sh ui
+./scripts/deploy.sh api
+```
+
+The deploy script automatically:
+- Builds images via `gcloud builds submit`
+- Pushes to Artifact Registry
+- Deploys to Cloud Run
+- Registers the Telegram webhook with the live service URL
+
+### Local development with docker-compose
+
+```bash
+cp .env.example .env
+# edit .env — add TELEGRAM_BOT_TOKEN
+docker-compose up --build
+# UI:  http://localhost:8501
+# API: http://localhost:8080/health
+# MCP: http://localhost:8080/mcp/sse
+```
+
+For the Telegram bot locally, use polling mode (no public endpoint needed):
+
+```bash
+python -m app.bot.telegram
+```
+
+---
+
 ## Deployment — Streamlit Community Cloud
 
 1. Fork / push this repo to GitHub.
