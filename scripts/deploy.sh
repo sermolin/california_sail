@@ -43,9 +43,9 @@ deploy_ui() {
   echo "==> Building UI image (tag: ${TAG})"
   IMAGE="${REGISTRY}/california-sail-ui:${TAG}"
   gcloud builds submit \
-    --tag "${IMAGE}" \
+    --config cloudbuild.ui.yaml \
+    --substitutions "_IMAGE=${IMAGE}" \
     --project "${PROJECT_ID}" \
-    --dockerfile Dockerfile.ui \
     .
 
   echo "==> Deploying california-sail-ui to Cloud Run"
@@ -59,17 +59,16 @@ deploy_ui() {
     --memory 512Mi \
     --cpu 1 \
     --min-instances 0 \
-    --max-instances 3 \
-    --set-env-vars "PORT=8501"
+    --max-instances 3
 }
 
 deploy_api() {
   echo "==> Building API image (tag: ${TAG})"
   IMAGE="${REGISTRY}/california-sail-api:${TAG}"
   gcloud builds submit \
-    --tag "${IMAGE}" \
+    --config cloudbuild.api.yaml \
+    --substitutions "_IMAGE=${IMAGE}" \
     --project "${PROJECT_ID}" \
-    --dockerfile Dockerfile.api \
     .
 
   echo "==> Deploying california-sail-api to Cloud Run"
@@ -84,7 +83,7 @@ deploy_api() {
     --cpu 1 \
     --min-instances 0 \
     --max-instances 5 \
-    --set-env-vars "PORT=8080,PYTHONPATH=/app" \
+    --set-env-vars "PYTHONPATH=/app" \
     --update-secrets "TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest"
 
   # Retrieve the deployed service URL and register it as WEBHOOK_URL
