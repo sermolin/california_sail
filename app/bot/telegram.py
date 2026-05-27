@@ -13,6 +13,13 @@ Commands
 /windows <zone_id>         Best sailing windows in a zone
 /warnings <region_id>      Active NOAA marine warnings
 /explain <zone_id>         Score breakdown for the next hour
+/reset                     Clear your conversation history with the AI agent
+
+Natural language
+----------------
+Any plain-text message (not starting with /) is routed to the AI agent,
+which uses OpenRouter to understand the question and calls the forecast
+tools automatically.  Set OPENROUTER_API_KEY and OPENROUTER_MODEL in .env.
 
 Run modes
 ---------
@@ -25,6 +32,7 @@ Webhook (started by app/api/main.py via the Telegram Application):
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
@@ -37,6 +45,7 @@ from telegram.ext import (
 )
 
 import app.mcp.tools as _tools
+from app.bot.agent import reset_history, run_agent
 from app.bot.formatters import (
     format_compare,
     format_explain,
@@ -94,7 +103,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Welcome message."""
     text = (
         "⛵ *California Sail* — live sailing conditions\n\n"
-        "Commands:\n"
+        "Just ask me anything in plain English — for example:\n"
+        "_Where should I sail in SF Bay today?_\n"
+        "_When are the best windows at Shilshole this weekend?_\n"
+        "_Is it safe to take beginners out in Sardinia?_\n\n"
+        "Or use a slash command for instant results:\n"
         "/regions — list all regions\n"
         "/zones sf\\-bay — list zones in a region\n"
         "/compare sf\\-bay — rank zones by sailability\n"
@@ -102,7 +115,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/windows city\\-front — best sailing windows\n"
         "/warnings sf\\-bay — active marine warnings\n"
         "/explain city\\-front — score breakdown\n"
-        "/profiles — list sailor profiles\n\n"
+        "/profiles — list sailor profiles\n"
+        "/reset — clear conversation history\n\n"
         "Regions: `sf-bay` \\| `puget-sound` \\| `sardinia`\n"
         "Profiles: `school` \\| `cruiser` \\| `racer`"
     )
@@ -246,6 +260,16 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _reply_error(update, f"Could not explain score: {exc}")
 
 
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/reset — clear conversation history for this user."""
+    user = update.effective_user
+    if user:
+        reset_history(user.id)
+    chat = update.effective_chat
+    if chat:
+        await chat.send_message("Conversation history cleared. What would you like to know?")
+
+
 async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Catch-all for unrecognised commands."""
     await _reply_error(
@@ -255,17 +279,43 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def msg_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Catch-all for plain text messages (not commands)."""
-    await _reply_error(
-        update,
-        "I only understand commands. Try one of these:\n\n"
-        "/compare sf-bay — rank all SF Bay zones\n"
-        "/forecast city-front — forecast for a zone\n"
-        "/warnings sf-bay — active marine warnings\n"
-        "/windows shilshole — best sailing windows\n"
-        "/explain city-front — score breakdown\n\n"
-        "Send /start for the full list.",
-    )
+    """Route plain-text messages to the AI agent (falls back to help text if no API key)."""
+    user = update.effective_user
+    text = update.message.text if update.message else None
+    if not text or not user:
+        return
+
+    chat = update.effective_chat
+    if not chat:
+        return
+
+    # Show a typing indicator while the agent works.
+    await chat.send_action("typing")
+
+    try:
+        reply = await asyncio.to_thread(run_agent, user.id, text)
+    except RuntimeError as exc:
+        # OPENROUTER_API_KEY not set — give a helpful nudge.
+        _log.warning("Agent unavailable: %s", exc)
+        await chat.send_message(
+            "The AI agent is not configured yet.\n\n"
+            "Ask your admin to set OPENROUTER_API_KEY, or use slash commands:\n\n"
+            "/compare sf-bay — rank all SF Bay zones\n"
+            "/forecast city-front — forecast for a zone\n"
+            "/warnings sf-bay — active marine warnings\n"
+            "/windows shilshole — best sailing windows\n\n"
+            "Send /start for the full list."
+        )
+        return
+    except Exception as exc:
+        _log.exception("Agent error for user %d", user.id)
+        await chat.send_message(
+            f"Something went wrong while fetching your answer: {exc}\n"
+            "Please try again, or use a slash command like /compare sf-bay."
+        )
+        return
+
+    await chat.send_message(reply)
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +337,7 @@ def build_application(token: str) -> Application:
     app.add_handler(CommandHandler("windows", cmd_windows))
     app.add_handler(CommandHandler("warnings", cmd_warnings))
     app.add_handler(CommandHandler("explain", cmd_explain))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     # Catch-alls — must be registered last
     app.add_handler(CommandHandler("unknown", cmd_unknown))
     app.add_handler(MessageHandler(filters.COMMAND, cmd_unknown))
