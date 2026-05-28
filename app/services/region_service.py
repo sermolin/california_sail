@@ -4,6 +4,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 from pathlib import Path
+from typing import Callable
 
 from app.domain.profiles import SailorProfile, get_default_profile
 from app.domain.regions import SailingRegion, SailingZone, load_regions
@@ -18,8 +19,13 @@ def get_all_zone_forecasts(
     days: int = 7,
     profile: SailorProfile | None = None,
     cache: ForecastCache | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> list[ZoneForecast]:
-    """Fetch forecasts for all zones in a region, sorted best-to-worst."""
+    """Fetch forecasts for all zones in a region, sorted best-to-worst.
+
+    on_progress: optional callback invoked after each zone completes.
+        Signature: (completed: int, total: int, zone_id: str)
+    """
     if profile is None:
         profile = get_default_profile()
 
@@ -48,13 +54,20 @@ def get_all_zone_forecasts(
             _log.warning("Could not fetch forecast for zone %s: %s", zone.id, exc)
             return None
 
+    total = len(region.zones)
     results: list[ZoneForecast] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    max_workers = min(8, total) if total > 0 else 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_fetch_zone, z): z for z in region.zones}
+        completed = 0
         for fut in concurrent.futures.as_completed(futures):
+            zone = futures[fut]
             result = fut.result()
             if result is not None:
                 results.append(result)
+            completed += 1
+            if on_progress is not None:
+                on_progress(completed, total, zone.id)
 
     results.sort(key=lambda r: -r.current_sailability)
     return results

@@ -107,10 +107,21 @@ def sailor_profile_selector(profiles: list) -> "SailorProfile":  # noqa: F821
 # Active marine warnings panel
 # ---------------------------------------------------------------------------
 
-def warnings_panel(warnings: list[dict]) -> None:
-    """Display active NOAA marine warnings. No-op if warnings is empty."""
+def warnings_panel(warnings: list[dict], source: str = "noaa") -> None:
+    """Display active marine warnings.  No-op if warnings is empty.
+
+    source: "noaa"      — NOAA NWS official alerts (US regions)
+            "synthetic" — derived from Open-Meteo forecast thresholds (non-US)
+    """
     if not warnings:
         return
+
+    source_label = {
+        "noaa": "NOAA NWS",
+        "synthetic": "Forecast-derived",
+    }.get(source, source.upper())
+
+    st.caption(f"⚡ Marine warnings · source: {source_label}")
 
     for w in warnings:
         sev = w.get("severity", "Unknown")
@@ -119,7 +130,7 @@ def warnings_panel(warnings: list[dict]) -> None:
         event = w.get("event", "Marine Warning")
         headline = w.get("headline", "")
         expires = w.get("expires", "")
-        expires_str = f"  ·  expires {expires[:16].replace('T', ' ')}" if expires else ""
+        expires_str = f"  ·  until {expires[:16].replace('T', ' ')}" if expires else ""
 
         st.markdown(
             f"""

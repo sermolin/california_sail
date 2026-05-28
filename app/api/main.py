@@ -1,20 +1,19 @@
 """California Sail — FastAPI service.
 
-Exposes three capabilities in one ASGI process:
+Exposes four capabilities in one ASGI process:
   GET  /health              — Cloud Run health check
   POST /telegram/webhook    — Telegram Bot API webhook receiver
+  POST /slack/events        — Slack Events API + slash commands receiver
   *    /mcp/*               — MCP SSE transport (FastMCP sse_app mounted)
 
 Environment variables
 ---------------------
-TELEGRAM_BOT_TOKEN   Required. The bot token from @BotFather.
-WEBHOOK_URL          Optional. Full HTTPS URL of this service (e.g.
-                     https://california-sail-api-xxxx-uw.a.run.app).
-                     When set, the service registers the webhook with Telegram
-                     on startup and deletes it on shutdown.
-                     When absent, the webhook endpoint is registered but no
-                     auto-registration happens (useful for local testing with
-                     a tunnel or if you register the webhook manually).
+TELEGRAM_BOT_TOKEN   Required for Telegram. Token from @BotFather.
+WEBHOOK_URL          Optional. Full HTTPS URL of this service. When set,
+                     the service registers the Telegram webhook on startup
+                     and deletes it on shutdown.
+SLACK_BOT_TOKEN      Required for Slack. xoxb-… token from OAuth & Permissions.
+SLACK_SIGNING_SECRET Required for Slack. From Basic Information in the app dashboard.
 
 Running locally (webhook mode is optional for local — use polling instead):
     uvicorn app.api.main:app --reload --port 8080
@@ -39,13 +38,14 @@ except ImportError:
 from fastapi import FastAPI, Request, Response, status
 from telegram import Update
 
+from app.bot.slack import build_slack_handler
 from app.bot.telegram import build_application
 from app.mcp.server import mcp
 
 _log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Telegram application (module-level singleton)
+# Singletons (initialised in lifespan)
 # ---------------------------------------------------------------------------
 
 def _get_token() -> str | None:
@@ -56,7 +56,8 @@ def _get_webhook_url() -> str | None:
     return os.environ.get("WEBHOOK_URL", "").strip() or None
 
 
-_tg_app = None  # initialised in lifespan
+_tg_app = None
+_slack_handler = None
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +66,9 @@ _tg_app = None  # initialised in lifespan
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    global _tg_app
+    global _tg_app, _slack_handler
+
+    # Telegram
     token = _get_token()
     if token:
         _tg_app = build_application(token)
@@ -90,6 +93,11 @@ async def _lifespan(app: FastAPI):
         await _tg_app.start()
     else:
         _log.warning("TELEGRAM_BOT_TOKEN not set — Telegram bot disabled.")
+
+    # Slack (no async init needed — handler is ready after build)
+    _slack_handler = build_slack_handler()
+    if _slack_handler:
+        _log.info("Slack bot enabled.")
 
     yield
 
@@ -121,6 +129,17 @@ app = FastAPI(
 async def health() -> dict[str, str]:
     """Cloud Run health check — always returns 200."""
     return {"status": "ok"}
+
+
+@app.post("/slack/events")
+async def slack_events(request: Request) -> Response:
+    """Receive events and slash commands from Slack."""
+    if _slack_handler is None:
+        return Response(
+            content="Slack bot not configured",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return await _slack_handler.handle(request)
 
 
 @app.post("/telegram/webhook")

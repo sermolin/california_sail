@@ -23,8 +23,12 @@ from typing import Any
 
 from app.domain.profiles import SailorProfile, get_all_profiles, get_profile_by_id
 from app.domain.regions import SailingRegion, load_regions
+from app.domain.warnings import synthesize_warnings
 from app.infra.forecast_cache import TTLForecastCache
 from app.infra.noaa_warnings_client import fetch_marine_warnings
+from app.infra.open_meteo_client import fetch_forecast
+from app.infra.open_meteo_marine_client import fetch_marine_forecast
+from app.domain.normalize import marine_response_to_df, merge_to_hourly, open_meteo_response_to_df
 from app.mcp.serializers import (
     profile_to_dict,
     region_to_dict,
@@ -85,9 +89,9 @@ def list_regions() -> list[dict[str, Any]]:
     Example response::
 
         [
-          {"id": "sf-bay", "name": "San Francisco Bay", "country": "US", "n_zones": 4},
-          {"id": "puget-sound", "name": "Puget Sound", "country": "US", "n_zones": 3},
-          {"id": "sardinia", "name": "Sardinia", "country": "IT", "n_zones": 3},
+          {"id": "sf-bay", "name": "San Francisco Bay", "country": "US", "n_zones": 8},
+          {"id": "puget-sound", "name": "Puget Sound", "country": "US", "n_zones": 7},
+          {"id": "sardinia", "name": "Sardinia", "country": "IT", "n_zones": 9},
         ]
     """
     return [
@@ -321,22 +325,26 @@ def best_sail_windows(
 # ---------------------------------------------------------------------------
 
 def get_active_warnings(region_id: str) -> list[dict[str, Any]]:
-    """Return any active NOAA marine warnings for a US region.
+    """Return active marine warnings for a region.
 
-    Only available for US regions (San Francisco Bay, Puget Sound).  Returns
-    an empty list for non-US regions (Sardinia) or when no warnings are active.
+    For US regions (San Francisco Bay, Puget Sound) this calls the NOAA NWS
+    Alerts API.  For non-US regions (e.g. Sardinia) warnings are synthesised
+    from the live Open-Meteo forecast for the region's default zone using
+    WMO/IMO Beaufort-scale thresholds (Strong Wind, Gale, Storm, Rough/Very
+    Rough Sea, Dense Fog).
 
     Args:
-        region_id: Region identifier (e.g. ``"sf-bay"``, ``"puget-sound"``).
+        region_id: Region identifier (e.g. ``"sf-bay"``, ``"puget-sound"``,
+                   ``"sardinia"``).
 
     Returns a list of warning dicts::
 
         [
           {
-            "event": "Small Craft Advisory",
-            "severity": "Moderate",
-            "headline": "Small Craft Advisory until 8 PM PDT",
-            "expires": "2026-05-15T20:00:00-07:00"
+            "event": "Gale Warning",
+            "severity": "Severe",
+            "headline": "Gale Warning: wind up to 38 kt, gusts up to 45 kt",
+            "expires": "2026-05-18T21:00:00"
           }
         ]
 
@@ -345,11 +353,42 @@ def get_active_warnings(region_id: str) -> list[dict[str, Any]]:
     Raises ``ValueError`` if region_id is not recognised.
     """
     region = _find_region(region_id)
-    if not region.nws_zone:
-        return []
 
+    # --- NOAA path (US regions) ---
+    if region.nws_zone:
+        try:
+            raw = fetch_marine_warnings(region.nws_zone, session=None)
+            return [
+                {
+                    "event": str(w.get("event", "")),
+                    "severity": str(w.get("severity", "")),
+                    "headline": str(w.get("headline", "")),
+                    "expires": str(w.get("expires", "")),
+                }
+                for w in (raw or [])
+            ]
+        except Exception as exc:
+            return [{"event": "error", "severity": "unknown", "headline": str(exc), "expires": ""}]
+
+    # --- Synthetic path (non-NOAA regions, e.g. Sardinia) ---
+    zone = region.default_zone
     try:
-        raw = fetch_marine_warnings(region.nws_zone, session=None)
+        raw_weather = fetch_forecast(
+            zone.latitude, zone.longitude, days=1, timezone=region.timezone,
+        )
+        df_weather = open_meteo_response_to_df(raw_weather)
+
+        df_marine = None
+        try:
+            raw_marine = fetch_marine_forecast(
+                zone.latitude, zone.longitude, days=1, timezone=region.timezone,
+            )
+            df_marine = marine_response_to_df(raw_marine)
+        except Exception:
+            pass
+
+        df_hourly = merge_to_hourly(df_weather, df_marine, None)
+        warnings = synthesize_warnings(df_hourly)
         return [
             {
                 "event": str(w.get("event", "")),
@@ -357,7 +396,7 @@ def get_active_warnings(region_id: str) -> list[dict[str, Any]]:
                 "headline": str(w.get("headline", "")),
                 "expires": str(w.get("expires", "")),
             }
-            for w in (raw or [])
+            for w in warnings
         ]
     except Exception as exc:
         return [{"event": "error", "severity": "unknown", "headline": str(exc), "expires": ""}]

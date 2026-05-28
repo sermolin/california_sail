@@ -1,13 +1,4 @@
-"""Streamlit page layout for California Sail — Phase 3 final.
-
-Flow:
-  1. Sidebar: region · forecast days · sailor profile
-  2. Main area:
-     a. Active NOAA marine warnings panel (US regions only)
-     b. Zone-comparison map + ranking table
-     c. Zone selectbox (defaults to best zone)
-     d. Detailed forecast for selected zone (all charts + profile-aware thresholds)
-"""
+"""Streamlit page layout for California Sail — Phase 3 final."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,6 +20,7 @@ from app.ui.components import (
     summary_metrics,
     warnings_panel,
 )
+from app.ui.zone_filters import apply_top_n, default_zone_index, filter_forecasts
 from app.viz.charts import (
     cloud_precip_chart,
     sailability_ribbon,
@@ -44,6 +36,8 @@ from app.viz.themes import VERDICT_COLORS, VERDICT_EMOJI
 
 import pandas as pd
 
+_TOP_N = 5  # default number of zones shown on map/table
+
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -52,8 +46,8 @@ import pandas as pd
 def render_sidebar(
     regions: list[SailingRegion],
     profiles: list[SailorProfile],
-) -> tuple[SailingRegion, int, SailorProfile]:
-    """Render sidebar. Returns (region, forecast_days, profile)."""
+) -> tuple[SailingRegion, int, SailorProfile, str | None]:
+    """Render sidebar. Returns (region, forecast_days, profile, favorite_zone_id)."""
     st.sidebar.header("Settings")
 
     region_names = [r.name for r in regions]
@@ -66,6 +60,26 @@ def render_sidebar(
     profile = sailor_profile_selector(profiles)
 
     st.sidebar.markdown("---")
+
+    # Favorite zone — stored per region in session state
+    fav_key = f"favorite_zone_{region.id}"
+    zone_ids = [z.id for z in region.zones]
+    zone_names_map = {z.id: z.name for z in region.zones}
+    current_fav = st.session_state.get(fav_key, zone_ids[0] if zone_ids else None)
+    if current_fav not in zone_ids:
+        current_fav = zone_ids[0] if zone_ids else None
+    fav_idx = zone_ids.index(current_fav) if current_fav in zone_ids else 0
+
+    selected_fav = st.sidebar.selectbox(
+        "Favorite zone",
+        options=zone_ids,
+        index=fav_idx,
+        format_func=lambda zid: zone_names_map.get(zid, zid),
+        help="Detailed forecast opens on this zone by default.",
+    )
+    st.session_state[fav_key] = selected_fav
+
+    st.sidebar.markdown("---")
     st.sidebar.markdown("**Scoring v3** — profile-driven thresholds")
     st.sidebar.caption(
         f"Gust gate: {profile.max_gust_kt:.0f} kt · "
@@ -73,7 +87,7 @@ def render_sidebar(
         f"Vis gate: {profile.min_visibility_km:.0f} km"
     )
 
-    return region, days, profile
+    return region, days, profile, selected_fav
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +146,9 @@ def render_zone_detail(result: ZoneForecast) -> None:
     zone = result.zone
     profile = result.profile
 
-    # Warnings panel at the top
     if result.warnings:
-        warnings_panel(result.warnings)
+        source = "noaa" if result.region.has_noaa_warnings() else "synthetic"
+        warnings_panel(result.warnings, source=source)
         st.markdown("")
 
     go_nogo_header(result.verdict, result.current_sailability, zone.name)
@@ -212,33 +226,111 @@ def run(sailing_areas_path: str | Path) -> None:
         return
 
     profiles = get_all_profiles()
-    region, days, profile = render_sidebar(regions, profiles)
+    region, days, profile, favorite_zone_id = render_sidebar(regions, profiles)
 
+    n_zones = len(region.zones)
     st.subheader(f"{region.name}")
-    st.caption(f"{len(region.zones)} zones · {days}-day forecast · {profile.emoji} {profile.name} profile")
+    st.caption(f"{n_zones} zones · {days}-day forecast · {profile.emoji} {profile.name} profile")
 
-    with st.spinner(f"Loading forecast for all {region.name} zones…"):
-        try:
-            all_results = get_all_zone_forecasts(region, days=days, profile=profile)
-        except Exception as e:
-            error_message(str(e))
-            return
+    # --- Load with progress bar ---
+    progress_bar = st.progress(0.0)
+    status_text = st.empty()
+
+    def on_progress(done: int, total: int, zone_id: str) -> None:
+        progress_bar.progress(done / total)
+        status_text.caption(f"Loading zones… {done}/{total} — {zone_id}")
+
+    try:
+        all_results = get_all_zone_forecasts(
+            region, days=days, profile=profile, on_progress=on_progress
+        )
+    except Exception as e:
+        progress_bar.empty()
+        status_text.empty()
+        error_message(str(e))
+        return
+
+    progress_bar.empty()
+    status_text.empty()
 
     if not all_results:
         st.error("No zone forecasts could be loaded. Please check your connection.")
         return
 
-    render_zone_comparison(all_results)
+    failed = n_zones - len(all_results)
+    if failed > 0:
+        st.warning(f"{failed} zone(s) could not be loaded and were excluded.")
+
+    # --- Search + top-N controls ---
+    col_search, col_toggle = st.columns([3, 1])
+    with col_search:
+        query = st.text_input(
+            "Filter zones",
+            placeholder="Search by name or id…",
+            label_visibility="collapsed",
+        )
+    with col_toggle:
+        top_n_on = st.checkbox(f"Top {_TOP_N} only", value=True)
+
+    filtered = filter_forecasts(all_results, query)
+
+    # Map/table view is further limited by top-N toggle
+    compare_results = apply_top_n(filtered, _TOP_N) if top_n_on else filtered
+
+    # Status caption
+    showing = len(compare_results)
+    total_loaded = len(all_results)
+    filtered_count = len(filtered)
+    if query.strip():
+        st.caption(
+            f"Showing {showing} of {filtered_count} matching zones "
+            f"(of {total_loaded} loaded)"
+        )
+    elif top_n_on and showing < total_loaded:
+        st.caption(f"Showing top {showing} of {total_loaded} zones — uncheck to see all")
+    else:
+        st.caption(f"Showing all {showing} zones")
+
+    if not compare_results:
+        st.info("No zones match your search. Try a different name or id.")
+    else:
+        render_zone_comparison(compare_results)
 
     st.markdown("---")
 
-    zone_names = [r.zone.name for r in all_results]
-    selected_zone_name = st.selectbox(
+    # Detail selectbox uses all search-filtered results (not limited by top-N)
+    if not filtered:
+        st.info("No zones to show for the current filter.")
+        return
+
+    result_by_id = {r.zone.id: r for r in filtered}
+
+    def _zone_label(zone_id: str) -> str:
+        r = result_by_id[zone_id]
+        emoji = VERDICT_EMOJI.get(r.verdict, "")
+        return f"{r.zone.name} — {r.current_sailability:.0f} {emoji}"
+
+    zone_id_options = [r.zone.id for r in filtered]
+    detail_index = default_zone_index(filtered, favorite_zone_id)
+
+    # Use a stable key so Streamlit preserves the user's selection across reruns.
+    # Reset to the favorite only when: first load for this region, the current
+    # selection has dropped out of the filtered list, or the sidebar favorite changed.
+    selectbox_key = f"zone_detail_{region.id}"
+    last_fav_key = f"last_fav_{region.id}"
+    current_val = st.session_state.get(selectbox_key)
+    fav_changed = st.session_state.get(last_fav_key) != favorite_zone_id
+
+    if current_val not in zone_id_options or fav_changed:
+        st.session_state[selectbox_key] = zone_id_options[detail_index]
+        st.session_state[last_fav_key] = favorite_zone_id
+
+    selected_zone_id = st.selectbox(
         "Select zone for detailed forecast",
-        options=zone_names,
-        index=0,
+        options=zone_id_options,
+        key=selectbox_key,
+        format_func=_zone_label,
         help="Zones are sorted best-to-worst by current sailability.",
     )
-    selected_result = next(r for r in all_results if r.zone.name == selected_zone_name)
 
-    render_zone_detail(selected_result)
+    render_zone_detail(result_by_id[selected_zone_id])

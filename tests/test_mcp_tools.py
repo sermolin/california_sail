@@ -337,8 +337,8 @@ class TestGetActiveWarnings:
                 result = tools.get_active_warnings("sf-bay")
         assert result == []
 
-    def test_empty_list_for_non_us_region(self):
-        # Sardinia: nws_zone=None
+    def test_synthetic_warnings_for_non_us_region(self):
+        # Sardinia has no nws_zone — the tool should synthesise from forecast data.
         sardinia_zone = SailingZone(
             id="stintino", name="Stintino", latitude=40.929, longitude=8.227,
             exposure="open", hazards=[],
@@ -348,9 +348,51 @@ class TestGetActiveWarnings:
             timezone="Europe/Rome", tide_station_id=None, nws_zone=None,
             zones=[sardinia_zone],
         )
+        calm_df = pd.DataFrame({
+            "wind_kt": [10.0] * 24,
+            "gust_kt": [12.0] * 24,
+            "visibility_m": [10_000.0] * 24,
+        })
         with patch.object(tools, "_get_regions", return_value=[sardinia]):
-            result = tools.get_active_warnings("sardinia")
+            with patch.object(tools, "fetch_forecast", return_value={}):
+                with patch.object(tools, "open_meteo_response_to_df", return_value=calm_df):
+                    with patch.object(tools, "marine_response_to_df", return_value=pd.DataFrame()):
+                        with patch.object(tools, "fetch_marine_forecast", return_value={}):
+                            with patch.object(tools, "merge_to_hourly", return_value=calm_df):
+                                result = tools.get_active_warnings("sardinia")
+        # Calm conditions → no warnings
+        assert isinstance(result, list)
         assert result == []
+
+    def test_synthetic_warning_issued_for_gale(self):
+        sardinia_zone = SailingZone(
+            id="stintino", name="Stintino", latitude=40.929, longitude=8.227,
+            exposure="open", hazards=[],
+        )
+        sardinia = SailingRegion(
+            id="sardinia", name="Sardinia", country="IT",
+            timezone="Europe/Rome", tide_station_id=None, nws_zone=None,
+            zones=[sardinia_zone],
+        )
+        gale_df = pd.DataFrame({
+            "wind_kt": [35.0] * 24,
+            "gust_kt": [42.0] * 24,
+            "visibility_m": [10_000.0] * 24,
+        })
+        with patch.object(tools, "_get_regions", return_value=[sardinia]):
+            with patch.object(tools, "fetch_forecast", return_value={}):
+                with patch.object(tools, "open_meteo_response_to_df", return_value=gale_df):
+                    with patch.object(tools, "marine_response_to_df", return_value=pd.DataFrame()):
+                        with patch.object(tools, "fetch_marine_forecast", return_value={}):
+                            with patch.object(tools, "merge_to_hourly", return_value=gale_df):
+                                result = tools.get_active_warnings("sardinia")
+        assert len(result) >= 1
+        events = [w["event"] for w in result]
+        assert "Gale Warning" in events
+        # Each warning must have the four serialised keys
+        for w in result:
+            for key in ("event", "severity", "headline", "expires"):
+                assert key in w
 
     def test_raises_for_unknown_region(self):
         with patch.object(tools, "_get_regions", return_value=_make_regions_list()):

@@ -11,7 +11,7 @@ Commands
 /compare <region_id>       Rank all zones in a region
 /compare <region_id> <profile_id>  Rank with a specific profile
 /windows <zone_id>         Best sailing windows in a zone
-/warnings <region_id>      Active NOAA marine warnings
+/warnings <region_id>      Active marine warnings (all regions)
 /explain <zone_id>         Score breakdown for the next hour
 /reset                     Clear your conversation history with the AI agent
 

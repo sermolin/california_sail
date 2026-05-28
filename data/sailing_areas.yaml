@@ -57,6 +57,50 @@
         - shallow water
         - light and variable wind
 
+    - id: richmond-ybc
+      name: Richmond / Point Richmond
+      latitude: 37.913
+      longitude: -122.378
+      exposure: open
+      flood_dir_deg: 75       # ENE — flood into Central/North Bay
+      hazards:
+        - strong ebb/flood at Point Richmond
+        - refinery tanker traffic
+        - afternoon sea breeze
+
+    - id: treasure-island
+      name: Treasure Island / Central Bay
+      latitude: 37.825
+      longitude: -122.371
+      exposure: open
+      flood_dir_deg: 85       # E — central bay flood
+      hazards:
+        - wind shadow from Yerba Buena Island
+        - ferry and ship traffic
+        - confused chop on ebb vs westerly
+
+    - id: sausalito
+      name: Sausalito / Richardson Bay
+      latitude: 37.859
+      longitude: -122.485
+      exposure: sheltered
+      flood_dir_deg: 70       # ENE — flood into the bay past Raccoon Strait
+      hazards:
+        - afternoon westerly funneling
+        - strong currents near Golden Gate
+        - crowded mooring field
+
+    - id: alameda-estuary
+      name: Alameda / Oakland Estuary
+      latitude: 37.773
+      longitude: -122.276
+      exposure: sheltered
+      flood_dir_deg: 135      # SE — flood into Oakland Estuary
+      hazards:
+        - container ship traffic (Port of Oakland)
+        - narrow channel and powerboat wash
+        - light wind in estuary
+
 - id: puget-sound
   name: Puget Sound (Seattle)
   country: US
@@ -107,6 +151,39 @@
         - tidal rips
         - variable wind
 
+    - id: bainbridge
+      name: Bainbridge Island / Eagle Harbor
+      latitude: 47.622
+      longitude: -122.515
+      exposure: sheltered
+      flood_dir_deg: 165      # SSE — flood into Central Sound
+      hazards:
+        - ferry wakes (Seattle–Bainbridge)
+        - light wind in lee of island
+        - tidal rips off Blakely Rock
+
+    - id: gig-harbor
+      name: Gig Harbor
+      latitude: 47.327
+      longitude: -122.583
+      exposure: sheltered
+      flood_dir_deg: 155      # SSE — flood into South Sound
+      hazards:
+        - narrow harbor entrance
+        - light wind in harbor
+        - Tacoma Narrows current influence
+
+    - id: des-moines
+      name: Des Moines / Three Tree Point
+      latitude: 47.403
+      longitude: -122.339
+      exposure: open
+      flood_dir_deg: 170      # S — flood into South Central Sound
+      hazards:
+        - ferry traffic to Vashon
+        - steep chop on southerly
+        - strong currents near Tacoma Narrows
+
 - id: sardinia
   name: Sardinia
   country: IT
@@ -125,6 +202,17 @@
         - rocky coastline
         - dense boat traffic in season
 
+    - id: la-maddalena
+      name: La Maddalena Archipelago
+      latitude: 41.213
+      longitude: 9.405
+      exposure: sheltered
+      flood_dir_deg: null
+      hazards:
+        - crowded anchorages in peak season
+        - marine park anchoring restrictions
+        - Libeccio / Grecale gusts between islands
+
     - id: bonifacio
       name: Bonifacio Strait
       latitude: 41.370
@@ -135,6 +223,17 @@
         - strong wind acceleration through strait
         - tide-driven current (up to 2 kt)
         - rocky passages
+
+    - id: gulf-orosei
+      name: Gulf of Orosei / Cala Gonone
+      latitude: 40.283
+      longitude: 9.638
+      exposure: sheltered
+      flood_dir_deg: null
+      hazards:
+        - Sirocco swell from SE
+        - rocky calanques and shallow spots near shore
+        - dense summer boat traffic
 
     - id: cagliari
       name: Cagliari Gulf
@@ -155,3 +254,36 @@
       hazards:
         - Mistral swell from NW
         - anchoring restrictions near marine park
+
+    - id: stintino
+      name: Stintino / Asinara
+      latitude: 40.935
+      longitude: 8.228
+      exposure: open
+      flood_dir_deg: null
+      hazards:
+        - Mistral swell and gusts from NW
+        - Asinara marine park anchoring limits
+        - shallow La Pelosa approaches
+
+    - id: villasimius
+      name: Villasimius / Capo Carbonara
+      latitude: 39.144
+      longitude: 9.519
+      exposure: open
+      flood_dir_deg: null
+      hazards:
+        - Capo Carbonara marine park restrictions
+        - Mistral chop when wind veers W
+        - crowded anchorages in August
+
+    - id: carloforte
+      name: Carloforte / Isola di San Pietro
+      latitude: 39.149
+      longitude: 8.307
+      exposure: open
+      flood_dir_deg: null
+      hazards:
+        - strong Mistral in Strait of Sardinia
+        - rocky lee shores on San Pietro
+        - limited shelter from NW swell
