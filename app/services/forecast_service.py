@@ -3,6 +3,7 @@
 v3 adds:
   - SailorProfile parameter drives scoring thresholds
   - NOAA marine warnings fetch as 4th concurrent call (US regions only)
+  - Synthetic marine warnings for non-NOAA regions (Sardinia etc.) derived from forecast data
   - ZoneForecast gains `warnings` and `profile` fields
 
 Cache refactor (Phase 4a):
@@ -30,6 +31,7 @@ from app.domain.normalize import (
 from app.domain.profiles import SailorProfile, get_default_profile, get_profile_by_id
 from app.domain.regions import SailingRegion, SailingZone
 from app.domain.scoring import add_sailability_to_hourly, best_windows, daily_sailability_avg, verdict
+from app.domain.warnings import synthesize_warnings
 from app.infra.config import load_config
 from app.infra.forecast_cache import ForecastCache, StreamlitForecastCache
 from app.infra.noaa_tides_client import fetch_tide_predictions
@@ -120,6 +122,10 @@ def _fetch_and_score(
 
     df_hourly = merge_to_hourly(df_weather, df_marine, df_tides)
     df_hourly = add_sailability_to_hourly(df_hourly, flood_dir_deg=zone.flood_dir_deg, profile=profile)
+
+    # For non-NOAA regions (e.g. Sardinia), synthesise warnings from forecast data.
+    if not region.has_noaa_warnings():
+        warnings = synthesize_warnings(df_hourly)
 
     windows = best_windows(df_hourly, window_hours=3, top_n=3)
     df_daily = daily_sailability_avg(df_hourly)

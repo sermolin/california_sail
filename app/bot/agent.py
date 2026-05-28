@@ -62,7 +62,7 @@ questions accurately.
 
 Guidelines:
 - Always call get_active_warnings when giving safety-sensitive advice or \
-  recommending a sail plan for a US region.
+  recommending a sail plan for any region.
 - Use compare_zones_in_region to rank zones when the user asks where to sail \
   in a region without specifying a zone.
 - Use best_sail_windows when the user asks about timing or "when to go".
@@ -216,8 +216,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_active_warnings",
             "description": (
-                "Return active NOAA marine warnings for a US region. "
-                "Returns an empty list for non-US regions or when no warnings are active. "
+                "Return active marine warnings for a region. "
+                "US regions use NOAA NWS alerts; non-US regions (e.g. Sardinia) use "
+                "forecast-derived warnings (WMO thresholds). "
+                "Returns an empty list when conditions are clear. "
                 "Always call this for SF Bay or Puget Sound before recommending a sail plan."
             ),
             "parameters": {

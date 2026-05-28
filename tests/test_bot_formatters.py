@@ -20,7 +20,7 @@ from app.bot.formatters import (
 # ---------------------------------------------------------------------------
 
 _REGIONS = [
-    {"id": "sf-bay", "name": "San Francisco Bay", "country": "US", "n_zones": 4},
+    {"id": "sf-bay", "name": "San Francisco Bay", "country": "US", "n_zones": 8},
     {"id": "sardinia", "name": "Sardinia", "country": "IT", "n_zones": 3},
 ]
 

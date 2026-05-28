@@ -86,6 +86,36 @@ class TestGetAllZoneForecasts:
         assert len(results) == 1
         assert results[0].zone.id == "zone-1"
 
+    def test_on_progress_called_for_every_zone(self):
+        region = _make_region(n_zones=3)
+        side_effects = [
+            _make_zone_forecast(region.zones[i], region, score=float(i * 10 + 50))
+            for i in range(3)
+        ]
+
+        calls: list[tuple[int, int, str]] = []
+
+        def on_progress(done: int, total: int, zone_id: str) -> None:
+            calls.append((done, total, zone_id))
+
+        with patch("app.services.region_service.get_zone_forecast", side_effect=side_effects):
+            get_all_zone_forecasts(region, days=3, on_progress=on_progress)
+
+        assert len(calls) == 3
+        # final call must have done == total == 3
+        final_done, final_total, _ = calls[-1]
+        assert final_done == final_total == 3
+
+    def test_on_progress_none_does_not_raise(self):
+        region = _make_region(n_zones=2)
+        side_effects = [
+            _make_zone_forecast(region.zones[i], region, score=70.0)
+            for i in range(2)
+        ]
+        with patch("app.services.region_service.get_zone_forecast", side_effect=side_effects):
+            results = get_all_zone_forecasts(region, days=3, on_progress=None)
+        assert len(results) == 2
+
 
 class TestGetRegionByName:
     def test_exact_match(self):

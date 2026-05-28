@@ -157,6 +157,10 @@ california_sail/
 | Berkeley Olympic Circle | 37.866 / -122.318 | Open | 90° (E) |
 | Raccoon Strait | 37.873 / -122.460 | Channel | 65° (ENE) |
 | South Bay / Coyote Pt | 37.594 / -122.319 | Sheltered | 160° (SSE) |
+| Richmond / Point Richmond | 37.913 / -122.378 | Open | 75° (ENE) |
+| Treasure Island / Central Bay | 37.825 / -122.371 | Open | 85° (E) |
+| Sausalito / Richardson Bay | 37.859 / -122.485 | Sheltered | 70° (ENE) |
+| Alameda / Oakland Estuary | 37.773 / -122.276 | Sheltered | 135° (SE) |
 
 ### Puget Sound (Seattle)
 | Zone | Lat/Lon | Exposure |
@@ -165,14 +169,22 @@ california_sail/
 | Port Townsend | 48.113 / -122.759 | Open |
 | Elliott Bay | 47.607 / -122.341 | Open |
 | Possession Sound | 47.995 / -122.278 | Open |
+| Bainbridge Island / Eagle Harbor | 47.622 / -122.515 | Sheltered |
+| Gig Harbor | 47.327 / -122.583 | Sheltered |
+| Des Moines / Three Tree Point | 47.403 / -122.339 | Open |
 
 ### Sardinia
 | Zone | Lat/Lon | Exposure |
 |---|---|---|
 | Costa Smeralda | 41.082 / 9.533 | Open |
+| La Maddalena Archipelago | 41.213 / 9.405 | Sheltered |
 | Bonifacio Strait | 41.370 / 9.150 | Channel |
+| Gulf of Orosei / Cala Gonone | 40.283 / 9.638 | Sheltered |
 | Cagliari Gulf | 39.182 / 9.122 | Open |
 | Alghero | 40.570 / 8.316 | Open |
+| Stintino / Asinara | 40.935 / 8.228 | Open |
+| Villasimius / Capo Carbonara | 39.144 / 9.519 | Open |
+| Carloforte / Isola di San Pietro | 39.149 / 8.307 | Open |
 
 ---
 
