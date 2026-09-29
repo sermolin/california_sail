@@ -14,6 +14,7 @@ California Sail is a sailing-conditions decision-support platform. It fetches re
 | [Local Setup](local-setup.md) | Prerequisites, virtual environment, environment variables, run commands |
 | [Deployment](deployment.md) | GCP Cloud Run, Artifact Registry, Cloud Build, Secret Manager, `deploy.sh` |
 | [Integrations](integrations.md) | MCP server (stdio + SSE), Telegram bot, Slack bot, OpenRouter NL agent |
+| [Slack setup](slack-setup.md) | Slack account, app, bot token, signing secret, and request URL |
 | [Testing](testing.md) | Test layout, fixtures, how to run, coverage targets |
 
 ---

@@ -9,11 +9,11 @@ This document describes how the California Sail application is structured at eve
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Clients / Entry points                                         │
-│  ┌──────────┐  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
-│  │Streamlit │  │ Telegram /  │  │  MCP AI    │  │  Slack   │  │
-│  │   UI     │  │  Slack bot  │  │  agents    │  │  Slash   │  │
-│  └────┬─────┘  └──────┬──────┘  └─────┬──────┘  └────┬─────┘  │
-└───────┼───────────────┼───────────────┼───────────────┼────────┘
+│  ┌──────────┐  ┌─────────────┐  ┌────────────┐  ┌──────────┐    │
+│  │Streamlit │  │  Telegram   │  │   Slack    │  │  MCP AI  │    │
+│  │   UI     │  │  channel    │  │  channel   │  │  agents  │    │
+│  └────┬─────┘  └──────┬──────┘  └─────┬──────┘  └─────┬────┘    │
+└───────┼───────────────┼───────────────┼───────────────┼─────────┘
         │               │               │               │
 ┌───────▼───────────────▼───────────────▼───────────────▼────────┐
 │  Service layer  (app/services/)                                 │
@@ -54,7 +54,7 @@ This document describes how the California Sail application is structured at eve
 └────────────────────────────────────────────────────────────────┘
 ```
 
-Additionally, three cross-cutting packages sit above the service layer:
+Additionally, four cross-cutting packages sit above the service layer. Telegram and Slack are peer clients of that layer: each channel adapter lives in `app/bot/` and reaches forecasts only through `app/mcp/tools` or the shared natural-language agent.
 
 | Package | Responsibility |
 |---|---|
@@ -94,7 +94,10 @@ For local development without Docker, a third mode exists:
 ```
 python -m app.bot.telegram      # Telegram polling (replaces webhook)
 python -m app.mcp.server        # MCP stdio (for Cursor / Claude Desktop)
+uvicorn app.api.main:app        # Slack channel: POST /slack/events
 ```
+
+Slack has no polling process. The Slack app's request URL must be able to reach `POST /slack/events` on this API process.
 
 ---
 
@@ -102,6 +105,11 @@ python -m app.mcp.server        # MCP stdio (for Cursor / Claude Desktop)
 
 ```mermaid
 graph TB
+    subgraph chat["Inbound channels"]
+        TGAPI["Telegram Bot API<br/>webhook or polling"]
+        SLAPI["Slack<br/>Events API + slash commands"]
+    end
+
     subgraph entry["Entry Points"]
         APP["app/app.py<br/>Streamlit entry"]
         APIMAIN["app/api/main.py<br/>FastAPI ASGI"]
@@ -164,9 +172,13 @@ graph TB
         NWS["NOAA NWS<br/>warnings"]
     end
 
+    TGAPI --> APIMAIN
+    SLAPI --> APIMAIN
     APP --> LAYOUT
     LAYOUT --> COMP & CHARTS & ZF & FS & RS
     APIMAIN --> TG & SL & MCPSERVER
+    TG --> FMT
+    SL --> SFMT
     TGPOLL --> TG
     TG & SL --> TOOLS & AGENT
     AGENT --> TOOLS
@@ -186,11 +198,56 @@ graph TB
 
 ---
 
-## 4. Data flow — single zone forecast
+## 4. Messaging channels
+
+Telegram and Slack are peer channels on the API process. Each one is an adapter in `app/bot/`. The adapter checks the platform's credentials, accepts the incoming message, and either calls `app.mcp.tools` or the shared natural-language agent. Scoring, caching, and the weather clients are the same code the UI and the MCP server use.
+
+| | Telegram | Slack |
+|---|---|---|
+| Adapter | `app/bot/telegram.py` | `app/bot/slack.py` |
+| Formatter | `app/bot/formatters.py` (MarkdownV2) | `app/bot/slack_formatters.py` (mrkdwn) |
+| Production ingress | `POST /telegram/webhook` | `POST /slack/events` |
+| Local mode | `python -m app.bot.telegram` (polling) | The same API route; Slack must reach a public URL |
+| Structured queries | `/regions`, `/zones`, `/profiles`, `/forecast`, `/compare`, `/windows`, `/warnings`, `/explain` | The same names, registered as slash commands |
+| Plain language | Any message that is not a command | Direct messages and `app_mention` |
+| Credentials | `TELEGRAM_BOT_TOKEN` | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |
+
+Both channels share `app/bot/agent.py`. `run_agent` keeps a short per-user history and asks OpenRouter to call the MCP tools. Slack user IDs are strings, so `_slack_uid` hashes them to the integer key that history store expects. `run_agent` is synchronous, so both handlers call it with `asyncio.to_thread` and leave the event loop free while OpenRouter responds. Slash commands and Telegram commands skip the agent: they call the tool functions directly, then the channel formatter renders the dict.
+
+Asking where to sail from Slack:
 
 ```mermaid
 sequenceDiagram
-    participant Client as Client<br/>(UI / MCP / Bot)
+    participant User as Slack user
+    participant Slack as Slack
+    participant API as POST /slack/events
+    participant Bot as slack.py
+    participant Agent as agent.py
+    participant Tools as mcp/tools
+
+    User->>Slack: @california-sail where should we sail on the Bay?
+    Slack->>API: app_mention event
+    API->>Bot: Bolt checks the signing secret
+    Bot->>Agent: run_agent(user, text)
+    Agent->>Tools: compare_zones_in_region("sf-bay")
+    Agent->>Tools: get_active_warnings("sf-bay")
+    Tools-->>Agent: ranked zones and warnings
+    Agent-->>Bot: prose reply with GO / MAYBE / NO-GO
+    Bot->>Slack: say(reply)
+    Slack-->>User: channel message
+```
+
+A slash command such as `/compare sf-bay cruiser` takes the shorter path. Bolt acknowledges the command, `slack.py` calls `compare_zones_in_region` and `get_active_warnings`, and `format_compare` renders Slack mrkdwn. That path does not call OpenRouter.
+
+If either Slack secret is missing, `build_slack_handler()` returns nothing and `POST /slack/events` responds with 503. The Telegram channel keeps running.
+
+---
+
+## 5. Data flow — single zone forecast
+
+```mermaid
+sequenceDiagram
+    participant Client as Client<br/>(UI / MCP / Telegram / Slack)
     participant FS as forecast_service
     participant Cache as ForecastCache
     participant OM as Open-Meteo
@@ -227,7 +284,7 @@ sequenceDiagram
 
 ---
 
-## 5. Deployment topology on GCP
+## 6. Deployment topology on GCP
 
 ```
 ┌──────────────── GCP project: sermolin-2026 ──────────────────────┐
@@ -241,34 +298,39 @@ sequenceDiagram
 │  ┌──────────────────────────┐  ┌──────────────────────────────┐  │
 │  │ california-sail-ui       │  │ california-sail-api          │  │
 │  │ 512 Mi, port 8501        │  │ 512 Mi, port 8080            │  │
-│  │ no inbound secrets       │  │ secret: TELEGRAM_BOT_TOKEN   │  │
-│  │                          │  │ env: WEBHOOK_URL             │  │
-│  │ public HTTPS endpoint    │  │ public HTTPS endpoint        │  │
+│  │ no inbound secrets       │  │ TELEGRAM_BOT_TOKEN           │  │
+│  │                          │  │ SLACK_BOT_TOKEN              │  │
+│  │                          │  │ SLACK_SIGNING_SECRET         │  │
+│  │ public HTTPS endpoint    │  │ WEBHOOK_URL                  │  │
 │  └──────────────────────────┘  └──────────────────────────────┘  │
 │                                         │                        │
-│  Secret Manager                         │ reads secret           │
-│  └── TELEGRAM_BOT_TOKEN ────────────────┘                        │
+│  Secret Manager                         │ reads secrets          │
+│  ├── TELEGRAM_BOT_TOKEN ────────────────┤                        │
+│  ├── SLACK_BOT_TOKEN ───────────────────┤                        │
+│  └── SLACK_SIGNING_SECRET ──────────────┘                        │
 │                                                                   │
 │  Cloud Build                                                      │
 │  ├── cloudbuild.ui.yaml  → builds Dockerfile.ui                   │
 │  └── cloudbuild.api.yaml → builds Dockerfile.api                  │
 │                                                                   │
 └──────────────────────────────────────────────────────────────────┘
-                │                         │
-         Telegram API               Cursor / Claude
-         (webhook POST)             (MCP SSE or stdio)
+         │                    │                    │
+   Telegram Bot API     Slack Events API    Cursor / Claude
+   /telegram/webhook    /slack/events       MCP SSE or stdio
 ```
+
+Slack delivers slash commands, `app_mention` events, and direct messages to `POST /slack/events` on `california-sail-api`. The API reads `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` from the environment, the same place it reads `TELEGRAM_BOT_TOKEN`. `scripts/deploy.sh` currently mounts only the Telegram secret; until both Slack values are present, that route returns 503 and the Slack channel stays off.
 
 ---
 
-## 6. Caching strategy
+## 7. Caching strategy
 
 The same forecast service function is called from two very different runtimes:
 
 | Runtime | Cache backend | Implementation |
 |---|---|---|
 | Streamlit UI | `st.cache_data` (per-process, in-memory, TTL) | `_st_get_zone_forecast` decorated with `@st.cache_data` |
-| MCP server / bots / API | `TTLForecastCache` (thread-safe `cachetools.TTLCache`) | Passed explicitly as `cache=` argument |
+| MCP server / Telegram / Slack / API | `TTLForecastCache` (thread-safe `cachetools.TTLCache`) | Passed explicitly as `cache=` argument |
 
 `get_zone_forecast(zone, profile, days, cache=None)` — when `cache` is `None` or `StreamlitForecastCache`, it delegates to `_st_get_zone_forecast`; otherwise it calls `cache.get_or_compute(key, ttl, compute_fn)`.
 
@@ -276,7 +338,7 @@ The default TTL is 900 seconds (15 minutes), configurable via `CACHE_TTL_SECONDS
 
 ---
 
-## 7. External API summary
+## 8. External API summary
 
 | API | Provider | Data | Rate limit |
 |---|---|---|---|

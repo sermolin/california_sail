@@ -171,27 +171,23 @@ The Telegram bot uses [MarkdownV2](https://core.telegram.org/bots/api#markdownv2
 
 ### Setup
 
-1. Create a Slack app at https://api.slack.com/apps.
-2. Enable **Slash Commands** and **Event Subscriptions**.
-3. Add the following slash commands (all pointing to `<API_URL>/slack/events`):
-   - `/sail-regions`, `/sail-zones`, `/sail-profiles`, `/sail-forecast`, `/sail-compare`, `/sail-windows`, `/sail-warnings`, `/sail-explain`
-4. Subscribe to the `app_mention` event.
-5. Set `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` in `.env` / Secret Manager.
+Follow [Slack setup](slack-setup.md) to create a workspace, install the app, and copy `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`. Every slash command and event subscription uses `POST /slack/events`.
 
 ### Slash commands
 
-The Slack commands mirror the Telegram commands. They are handled by `app/bot/slack.py`.
+The Slack commands mirror the Telegram commands. They are handled by `app/bot/slack.py`. The command name in the Slack app must match the name in that file.
 
 | Command | Equivalent Telegram | Notes |
 |---|---|---|
-| `/sail-regions` | `/regions` | — |
-| `/sail-zones <region_id>` | `/zones` | — |
-| `/sail-profiles` | `/profiles` | — |
-| `/sail-forecast <zone_id> [...]` | `/forecast` | — |
-| `/sail-compare <region_id> [...]` | `/compare` | — |
-| `/sail-windows <zone_id> [...]` | `/windows` | — |
-| `/sail-warnings <region_id>` | `/warnings` | — |
-| `/sail-explain <zone_id> <hour>` | `/explain` | — |
+| `/regions` | `/regions` | — |
+| `/zones <region_id>` | `/zones` | — |
+| `/profiles` | `/profiles` | — |
+| `/forecast <zone_id> [profile_id]` | `/forecast` | — |
+| `/compare <region_id> [profile_id]` | `/compare` | — |
+| `/windows <zone_id> [profile_id]` | `/windows` | — |
+| `/warnings <region_id>` | `/warnings` | — |
+| `/explain <zone_id> [profile_id]` | `/explain` | — |
+| `/reset` | `/reset` | Clears the NL conversation for that Slack user |
 
 ### Natural language via app_mention
 
