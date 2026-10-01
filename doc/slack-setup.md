@@ -29,7 +29,7 @@ If you already belong to a workspace, you can install the app there instead. You
 ## 2. Create the Slack app
 
 1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with the account from the previous step.
-2. Click **Create New App**, then **From scratch**.
+2. Click **Create New App**, then **From scratch** (or ** Blandk App**).
 3. Set the app name to `California Sail` (this is the name people will @mention).
 4. Pick the workspace you just created.
 5. Click **Create App**. You land on **Basic Information**.
@@ -48,11 +48,11 @@ Keep it out of git. It goes in `.env` or in the API service environment, never i
 
 ## 4. Add bot scopes and install the app
 
-The token does not exist until the app is installed into the workspace.
+The token does not exist until the app is installed into the workspace. The following steps are best done from Slack web interface: https://app.slack.com/app
 
 1. In the left sidebar, open **OAuth & Permissions**.
 2. Scroll past token rotation, PKCE, and **Redirect URLs**. Leave those empty. California Sail uses a bot token from **Install to Workspace**, not an OAuth redirect.
-3. Stop at **Bot Token Scopes** (**Ámbitos de los tokens de usuarios bot**). Click **Add an OAuth Scope** (**Añadir un ámbito de OAuth**) on that section only. Leave **User Token Scopes** (**Ámbitos de los tokens de usuario**) empty.
+3. Stop at **Bot Token Scopes** . Click **Add an OAuth Scope** on that section only. Leave **User Token Scopes** empty.
 
 The scope box is a search field. It does not list every scope until you type the id. `commands` and `app_mentions:read` are bot scopes, so they never appear in the user-scope box. Type each id exactly, then click the match:
 
@@ -84,7 +84,7 @@ If you add or remove a scope later, Slack does not apply it until you click **Re
 2. Under **Show Tabs**, turn on **Messages Tab**.
 3. Check **Allow users to send Slash commands and messages from the messages tab**.
 
-Until that box is checked, the message field in the app conversation says **Se ha desactivado el envío de mensajes a esta aplicación.** Reload the conversation after saving. Direct messages still need the `message.im` event from section 9 before the API receives them.
+Until that box is checked, the message field in the app conversation says **Messaging has been disabled for this application** Reload the conversation after saving. Direct messages still need the `message.im` event from section 9 before the API receives them.
 
 ---
 
@@ -104,18 +104,28 @@ OPENROUTER_API_KEY=...
 OPENROUTER_MODEL=anthropic/claude-3-haiku
 ```
 
-Start the API and confirm it is healthy:
+Start the API:
 
 ```bash
 source .venv/bin/activate
 uvicorn app.api.main:app --reload --port 8080
 ```
 
+Confirm the process is up:
+
 ```bash
 curl -s http://localhost:8080/health
+# → {"status":"ok"}
 ```
 
-The log line `Slack bot enabled.` means both Slack variables were present at startup. `Slack bot disabled` means one of them is empty. Restart the process after you edit `.env`.
+That only means the API is running. Slack status is in the **uvicorn terminal**, not in `/health`:
+
+| Startup log | Meaning |
+|---|---|
+| `Slack bot enabled.` | Both `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` were set |
+| `SLACK_BOT_TOKEN or SLACK_SIGNING_SECRET not set — Slack bot disabled.` | One or both are empty |
+
+Restart uvicorn after you edit `.env` so those lines are re-evaluated.
 
 On the deployed API, set the same two variables on `california-sail-api`. `scripts/deploy.sh` currently mounts only `TELEGRAM_BOT_TOKEN`. Until the Slack values are on that service, `POST /slack/events` returns 503 and Slack's URL check fails.
 
@@ -136,13 +146,17 @@ For a tunnel while developing locally, leave uvicorn running on port 8080 and ex
 ngrok http 8080
 ```
 
-Use the `https://` forwarding URL ngrok prints, plus `/slack/events`. Start the API with both secrets loaded before you save the URL in Slack. Slack immediately sends a URL check. The Bolt handler answers it. A 503, a connection error, or a signature failure means the check will fail and Slack will refuse to save the URL.
+Use the `https://` forwarding URL ngrok prints, plus `/slack/events`. Example of the final URL: https://canopener-bovine-joining.ngrok-free.dev/slack/events
+Open api.slack.com/apps → your app
+Event Subscriptions → Enable Events → Request URL → paste that URL
+Wait for Slack’s green Verified check
+Here is what's happening under the hood (you need to start the API with both secrets loaded before you save the URL in Slack). Once you paste the URL, Slack immediately sends a URL check. The Bolt handler answers it. A 503, a connection error, or a signature failure means the check will fail and Slack will refuse to save the URL.
 
 ---
 
 ## 8. Register slash commands
 
-1. Open **Slash Commands** and click **Create New Command** once per row.
+1. In the left-side panel of your App, under **Features**, open **Slash Commands** and click **Create New Command** once per row.
 2. Set **Request URL** on every command to the URL from the previous step.
 3. Use these names. A different name, such as `/sail-forecast`, will not reach a handler.
 

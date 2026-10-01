@@ -8,18 +8,19 @@
 #          --repository-format=docker \
 #          --location=us-west1 \
 #          --project=sermolin-2026
-#   3. Store the Telegram bot token in Secret Manager:
-#        gcloud secrets create TELEGRAM_BOT_TOKEN \
-#          --project=sermolin-2026
-#        echo -n "YOUR_TOKEN" | \
-#          gcloud secrets versions add TELEGRAM_BOT_TOKEN --data-file=- \
-#          --project=sermolin-2026
-#   4. Grant Cloud Run service account access to the secret:
+#   3. Store bot/API secrets in Secret Manager (Telegram, Slack, OpenRouter):
+#        for S in TELEGRAM_BOT_TOKEN SLACK_BOT_TOKEN SLACK_SIGNING_SECRET OPENROUTER_API_KEY; do
+#          gcloud secrets create "$S" --project=sermolin-2026 || true
+#          # then: printf '%s' "$VALUE" | gcloud secrets versions add "$S" --data-file=- --project=sermolin-2026
+#        done
+#   4. Grant Cloud Run service account access to each secret:
 #        PROJECT_NUMBER=$(gcloud projects describe sermolin-2026 --format='value(projectNumber)')
-#        gcloud secrets add-iam-policy-binding TELEGRAM_BOT_TOKEN \
-#          --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-#          --role="roles/secretmanager.secretAccessor" \
-#          --project=sermolin-2026
+#        for S in TELEGRAM_BOT_TOKEN SLACK_BOT_TOKEN SLACK_SIGNING_SECRET OPENROUTER_API_KEY; do
+#          gcloud secrets add-iam-policy-binding "$S" \
+#            --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+#            --role="roles/secretmanager.secretAccessor" \
+#            --project=sermolin-2026
+#        done
 #
 # Usage:
 #   ./scripts/deploy.sh            # deploy both services
@@ -71,6 +72,9 @@ deploy_api() {
     --project "${PROJECT_ID}" \
     .
 
+  # Non-secret model slug (override with OPENROUTER_MODEL=... when invoking deploy.sh)
+  OPENROUTER_MODEL="${OPENROUTER_MODEL:-anthropic/claude-haiku-4.5}"
+
   echo "==> Deploying california-sail-api to Cloud Run"
   gcloud run deploy california-sail-api \
     --image "${IMAGE}" \
@@ -81,10 +85,11 @@ deploy_api() {
     --port 8080 \
     --memory 512Mi \
     --cpu 1 \
-    --min-instances 0 \
+    --min-instances 1 \
     --max-instances 5 \
-    --set-env-vars "PYTHONPATH=/app" \
-    --update-secrets "TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest"
+    --no-cpu-throttling \
+    --set-env-vars "PYTHONPATH=/app,OPENROUTER_MODEL=${OPENROUTER_MODEL}" \
+    --update-secrets "TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest"
 
   # Retrieve the deployed service URL and register it as WEBHOOK_URL
   SERVICE_URL=$(gcloud run services describe california-sail-api \
@@ -100,6 +105,8 @@ deploy_api() {
     --update-env-vars "WEBHOOK_URL=${SERVICE_URL}"
 
   echo "==> Telegram webhook will be registered automatically on next service startup."
+  echo "    Slack Request URL (Event Subscriptions + Slash Commands):"
+  echo "    ${SERVICE_URL}/slack/events"
   echo "    To trigger a restart: gcloud run services update california-sail-api --region ${REGION} --project ${PROJECT_ID} --update-env-vars NO_OP=$(date +%s)"
 }
 

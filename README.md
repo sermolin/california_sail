@@ -77,7 +77,7 @@ Verdict: GO ≥ 65 · MAYBE 35–64 · NO-GO < 35
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+ (`mcp[cli]` requires ≥ 3.10)
 - [pip](https://pip.pypa.io/)
 
 
@@ -87,7 +87,7 @@ Verdict: GO ≥ 65 · MAYBE 35–64 · NO-GO < 35
 ```bash
 git clone https://github.com/sermolin/california_sail.git
 cd california_sail
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -280,7 +280,9 @@ gcloud secrets create TELEGRAM_BOT_TOKEN --project=sermolin-2026
 echo -n "YOUR_TOKEN_HERE" | \
   gcloud secrets versions add TELEGRAM_BOT_TOKEN --data-file=- --project=sermolin-2026
 
-# 5. Grant the default compute SA access to the secret
+## TODO: update README here - need to reference deploy.md
+
+# 5. Grant the default compute Service Account access to the secret
 PROJECT_NUMBER=$(gcloud projects describe sermolin-2026 --format='value(projectNumber)')
 gcloud secrets add-iam-policy-binding TELEGRAM_BOT_TOKEN \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
